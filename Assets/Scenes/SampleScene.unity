@@ -27491,108 +27491,6 @@ Animator:
   m_AllowConstantClipSamplingOptimization: 1
   m_KeepAnimatorStateOnDisable: 0
   m_WriteDefaultValuesOnDisable: 0
---- !u!1001 &982024699
-PrefabInstance:
-  m_ObjectHideFlags: 0
-  serializedVersion: 2
-  m_Modification:
-    serializedVersion: 3
-    m_TransformParent: {fileID: 0}
-    m_Modifications:
-    - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalPosition.x
-      value: -0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalPosition.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalRotation.w
-      value: 1
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalRotation.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalRotation.y
-      value: -0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalRotation.z
-      value: -0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.x
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.y
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalEulerAnglesHint.z
-      value: 0
-      objectReference: {fileID: 0}
-    - target: {fileID: 919132149155446097, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_Name
-      value: Drone
-      objectReference: {fileID: 0}
-    - target: {fileID: 1151388028547126963, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalPosition.y
-      value: 1.5
-      objectReference: {fileID: 0}
-    - target: {fileID: 1151388028547126963, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      propertyPath: m_LocalPosition.z
-      value: -3
-      objectReference: {fileID: 0}
-    m_RemovedComponents: []
-    m_RemovedGameObjects: []
-    m_AddedGameObjects:
-    - targetCorrespondingSourceObject: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      insertIndex: 0
-      addedObject: {fileID: 1883599815}
-    m_AddedComponents:
-    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-      insertIndex: -1
-      addedObject: {fileID: 982024701}
-  m_SourcePrefab: {fileID: 100100000, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
---- !u!1 &982024700 stripped
-GameObject:
-  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-  m_PrefabInstance: {fileID: 982024699}
-  m_PrefabAsset: {fileID: 0}
---- !u!114 &982024701
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 982024700}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 187274928
-  InScenePlacedSourceGlobalObjectIdHash: 0
-  AlwaysReplicateAsRoot: 0
-  SynchronizeTransform: 1
-  ActiveSceneSynchronization: 0
-  SceneMigrationSynchronization: 1
-  SpawnWithObservers: 1
-  DontDestroyWithOwner: 0
-  AutoObjectParentSync: 1
---- !u!4 &982024702 stripped
-Transform:
-  m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
-  m_PrefabInstance: {fileID: 982024699}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1 &982699864
 GameObject:
   m_ObjectHideFlags: 0
@@ -32798,6 +32696,7 @@ GameObject:
   - component: {fileID: 1176503286}
   - component: {fileID: 1176503285}
   - component: {fileID: 1176503284}
+  - component: {fileID: 1176503288}
   m_Layer: 0
   m_Name: RecipientObject
   m_TagString: Untagged
@@ -33055,6 +32954,22 @@ MonoBehaviour:
       _value: '{}'
     - _memberName: installMatchmaking
       _value: '{"value__":0}'
+--- !u!114 &1176503288
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1176503275}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: df2ec3092b82cac43806cc6a16a6a1ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cubeRenderer: {fileID: 0}
+  objectType: 
+  pickedUpColor: {r: 0, g: 1, b: 0, a: 1}
+  defaultColor: {r: 1, g: 1, b: 1, a: 1}
 --- !u!1 &1176727691
 GameObject:
   m_ObjectHideFlags: 0
@@ -39281,8 +39196,8 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1395031333}
-  - component: {fileID: 1395031335}
   - component: {fileID: 1395031334}
+  - component: {fileID: 1395031335}
   m_Layer: 0
   m_Name: DroneSpawner
   m_TagString: Untagged
@@ -39834,6 +39749,7 @@ GameObject:
   - component: {fileID: 1411568413}
   - component: {fileID: 1411568412}
   - component: {fileID: 1411568411}
+  - component: {fileID: 1411568419}
   m_Layer: 0
   m_Name: BystanderObject
   m_TagString: Untagged
@@ -40091,6 +40007,22 @@ MonoBehaviour:
       _value: '{}'
     - _memberName: installMatchmaking
       _value: '{"value__":0}'
+--- !u!114 &1411568419
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1411568406}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: df2ec3092b82cac43806cc6a16a6a1ab, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cubeRenderer: {fileID: 0}
+  objectType: 
+  pickedUpColor: {r: 0, g: 1, b: 0, a: 1}
+  defaultColor: {r: 1, g: 1, b: 1, a: 1}
 --- !u!1 &1415677292
 GameObject:
   m_ObjectHideFlags: 0
@@ -53214,143 +53146,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 801374385}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1883599812
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1883599815}
-  - component: {fileID: 1883599813}
-  - component: {fileID: 1883599814}
-  - component: {fileID: 1883599818}
-  - component: {fileID: 1883599817}
-  - component: {fileID: 1883599816}
-  m_Layer: 0
-  m_Name: Drone Manager
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!114 &1883599813
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1883599812}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 3493304522
-  InScenePlacedSourceGlobalObjectIdHash: 0
-  AlwaysReplicateAsRoot: 0
-  SynchronizeTransform: 1
-  ActiveSceneSynchronization: 0
-  SceneMigrationSynchronization: 1
-  SpawnWithObservers: 1
-  DontDestroyWithOwner: 0
-  AutoObjectParentSync: 1
---- !u!114 &1883599814
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1883599812}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 3b454f85497a2bd4ca1990bb85325a69, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  confirmationTimeout: 10
-  guidanceTimeout: 15
-  navigator: {fileID: 0}
-  visuals: {fileID: 0}
-  enableDebugLogging: 1
---- !u!4 &1883599815
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1883599812}
-  serializedVersion: 2
-  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 1.426723, y: 1.6081679, z: 1.3063116}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 982024702}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1883599816
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1883599812}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d85d9e20a0081de4ebf268a297688e22, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  statusLight: {fileID: 0}
-  rotorParticles: {fileID: 0}
-  droneAnimator: {fileID: 0}
-  idleColor: {r: 1, g: 1, b: 1, a: 1}
-  flyingColor: {r: 0, g: 0, b: 1, a: 1}
-  confirmationColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-  guidanceColor: {r: 1, g: 0, b: 0, a: 1}
-  landingColor: {r: 0, g: 1, b: 0, a: 1}
-  blinkRate: 1
-  wobbleAmount: 0.1
-  wobbleSpeed: 2
-  enableDebugLogging: 1
---- !u!114 &1883599817
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1883599812}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 72637bcd4de7b5a4f894338abfd81075, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  arrivalThreshold: 0.5
-  updateInterval: 0.5
-  droneTransform: {fileID: 0}
-  navAgent: {fileID: 0}
-  enableDebugLogging: 1
---- !u!195 &1883599818
-NavMeshAgent:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1883599812}
-  m_Enabled: 1
-  m_AgentTypeID: 0
-  m_Radius: 0.5
-  m_Speed: 3.5
-  m_Acceleration: 8
-  avoidancePriority: 50
-  m_AngularSpeed: 120
-  m_StoppingDistance: 0
-  m_AutoTraverseOffMeshLink: 1
-  m_AutoBraking: 1
-  m_AutoRepath: 1
-  m_Height: 2
-  m_BaseOffset: 0
-  m_WalkableMask: 4294967295
-  m_ObstacleAvoidanceType: 4
 --- !u!1 &1883939950
 GameObject:
   m_ObjectHideFlags: 0
@@ -60740,6 +60535,5 @@ SceneRoots:
   - {fileID: 1007680197}
   - {fileID: 1176503283}
   - {fileID: 1411568407}
-  - {fileID: 982024699}
   - {fileID: 642497966}
   - {fileID: 1395031333}
