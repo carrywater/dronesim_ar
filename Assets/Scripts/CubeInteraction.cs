@@ -1,7 +1,7 @@
 using UnityEngine;
 using Unity.Netcode;
-using System.Linq;
 using DroneSim;
+using Oculus.Interaction; // Meta Interaction SDK
 
 namespace DroneSim
 {
@@ -20,105 +20,42 @@ namespace DroneSim
         public Color defaultColor = Color.white;
         
         // Networked pickup state
-        private NetworkVariable<bool> isPickedUp = new NetworkVariable<bool>(false, 
-            NetworkVariableReadPermission.Everyone, 
-            NetworkVariableWritePermission.Owner);
+        private NetworkVariable<bool> isPickedUp = new NetworkVariable<bool>(false);
 
-        // References to other components
-        private ScenarioManager scenarioManager;
-        private DroneSpawner droneSpawner;
-        
-        // Static references to track both cubes
-        private static CubeInteraction recipientCube;
-        private static CubeInteraction bystanderCube;
+        // Meta SDK Grabbable reference
+        private Grabbable grabbable;
+
+        private void Awake()
+        {
+            grabbable = GetComponent<Grabbable>();
+        }
 
         private void Start()
         {
-            // Ensure the cube has a renderer to change its color
             if (cubeRenderer == null) cubeRenderer = GetComponent<Renderer>();
-
-            // Find the ScenarioManager in the scene
-            scenarioManager = FindObjectOfType<ScenarioManager>();
-            if (scenarioManager == null)
+            if (cubeRenderer == null)
             {
-                Debug.LogError("[CubeInteraction] ScenarioManager not found in scene!");
+                Debug.LogError($"[CubeInteraction] No renderer found on {gameObject.name}!");
                 return;
             }
-            
-            // Find the DroneSpawner in the scene
-            droneSpawner = FindObjectOfType<DroneSpawner>();
-            if (droneSpawner == null)
-            {
-                Debug.LogError("[CubeInteraction] DroneSpawner not found in scene!");
-                return;
-            }
-
-            // Set up static references based on object type
-            if (string.IsNullOrEmpty(objectType))
-            {
-                Debug.LogError($"[CubeInteraction] Object type not set for {gameObject.name}!");
-                return;
-            }
-
-            if (objectType == "Recipient")
-            {
-                recipientCube = this;
-            }
-            else if (objectType == "Bystander")
-            {
-                bystanderCube = this;
-            }
-            else
-            {
-                Debug.LogError($"[CubeInteraction] Invalid object type '{objectType}' for {gameObject.name}!");
-                return;
-            }
-
-            // Subscribe to network variable changes
-            isPickedUp.OnValueChanged += OnPickupStateChanged;
-            
-            // Set initial color
             ChangeColor(defaultColor);
+            Debug.Log($"[CubeInteraction] {objectType} cube initialized with default color");
         }
 
-        private void OnDestroy()
+        // This will be hooked up in the Inspector via UnityEvent
+        public void OnGrabbed()
         {
-            // Clean up static references
-            if (recipientCube == this) recipientCube = null;
-            if (bystanderCube == this) bystanderCube = null;
+            Debug.Log($"[CubeInteraction] {objectType} grabbed via Meta event!");
 
-            // Unsubscribe from network variable changes
-            isPickedUp.OnValueChanged -= OnPickupStateChanged;
-        }
+            if (!IsOwner)
+            {
+                Debug.Log($"[CubeInteraction] {objectType} grab ignored - not owner");
+                return;
+            }
 
-        // This function is called when the player interacts with the cube
-        public void OnPickup()
-        {
-            if (!IsOwner) return; // Make sure only the object owner can pick it up
-
-            // Update the networked picked-up status
             isPickedUp.Value = true;
-        }
-
-        // Server RPC to reset the pickup state
-        [ServerRpc(RequireOwnership = false)]
-        public void ResetPickupStateServerRpc()
-        {
-            isPickedUp.Value = false;
-        }
-
-        private void OnPickupStateChanged(bool previousValue, bool newValue)
-        {
-            // Change the color to indicate the object was picked up
-            if (newValue)
-            {
-                ChangeColor(pickedUpColor);
-                CheckIfBothPickedUp();
-            }
-            else
-            {
-                ChangeColor(defaultColor);
-            }
+            ChangeColor(pickedUpColor);
+            Debug.Log($"[CubeInteraction] {objectType} color changed to {pickedUpColor}");
         }
 
         private void ChangeColor(Color color)
@@ -126,23 +63,11 @@ namespace DroneSim
             if (cubeRenderer != null && cubeRenderer.material != null)
             {
                 cubeRenderer.material.color = color;
+                Debug.Log($"[CubeInteraction] {objectType} cube color changed to {color}");
             }
-        }
-
-        // Check if both the recipient and bystander have been picked up
-        private void CheckIfBothPickedUp()
-        {
-            if (!IsServer || scenarioManager == null || droneSpawner == null) return;
-
-            // Check if both static references are valid and picked up
-            if (recipientCube != null && bystanderCube != null &&
-                recipientCube.isPickedUp.Value && bystanderCube.isPickedUp.Value)
+            else
             {
-                // Select a random scenario
-                scenarioManager.SelectRandomScenario();
-                
-                // Spawn the drone
-                droneSpawner.SpawnDrone();
+                Debug.LogError($"[CubeInteraction] {objectType} cube renderer not found!");
             }
         }
 

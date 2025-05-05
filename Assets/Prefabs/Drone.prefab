@@ -14,11 +14,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0
+      value: 1.074
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0
+      value: -1.58
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
       propertyPath: m_LocalRotation.w
@@ -54,11 +54,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1151388028547126963, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 1.5
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 1151388028547126963, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
       propertyPath: m_LocalPosition.z
-      value: -3
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -80,6 +80,11 @@ PrefabInstance:
       insertIndex: -1
       addedObject: {fileID: 6612909798270654408}
   m_SourcePrefab: {fileID: 100100000, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
+--- !u!4 &8128397603944563138 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
+  m_PrefabInstance: {fileID: 8594952709365163561}
+  m_PrefabAsset: {fileID: 0}
 --- !u!1 &8900817255335517048 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: c9fb746c3ab58a946bc4ce5cfe670534, type: 3}
@@ -97,8 +102,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d5a57f767e5e46a458fc5d3c628d0cbb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  GlobalObjectIdHash: 187274928
-  InScenePlacedSourceGlobalObjectIdHash: 0
+  GlobalObjectIdHash: 2957770309
+  InScenePlacedSourceGlobalObjectIdHash: 2972635179
   AlwaysReplicateAsRoot: 0
   SynchronizeTransform: 1
   ActiveSceneSynchronization: 0
@@ -120,8 +125,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   confirmationTimeout: 10
   guidanceTimeout: 15
-  navigator: {fileID: 0}
-  visuals: {fileID: 0}
+  navigator: {fileID: 2148014090311985798}
+  visuals: {fileID: 880913418512894646}
   enableDebugLogging: 1
 --- !u!114 &2148014090311985798
 MonoBehaviour:
@@ -137,8 +142,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   arrivalThreshold: 0.5
   updateInterval: 0.5
-  droneTransform: {fileID: 0}
-  navAgent: {fileID: 0}
+  droneTransform: {fileID: 8128397603944563138}
+  navAgent: {fileID: 6612909798270654408}
   enableDebugLogging: 1
 --- !u!114 &880913418512894646
 MonoBehaviour:
