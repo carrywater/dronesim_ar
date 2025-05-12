@@ -1,17 +1,13 @@
-using Unity.Netcode;
 using UnityEngine;
+using Unity.Netcode;
 
+/// <summary>
+/// Synchronizes each player's role across the network.
+/// </summary>
 public class RoleNetwork : NetworkBehaviour
 {
-    // Networked variable to store this client's role (default Bystander)
+    /// <summary>
+    /// The client's current role. Defaults to Bystander.
+    /// </summary>
     public NetworkVariable<Role> role = new NetworkVariable<Role>(Role.Bystander);
-
-    public override void OnNetworkSpawn()
-    {
-        if (IsServer)
-        {
-            // Ensure default role on spawn
-            role.Value = Role.Bystander;
-        }
-    }
 } 

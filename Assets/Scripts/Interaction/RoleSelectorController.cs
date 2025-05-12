@@ -1,98 +1,76 @@
 using UnityEngine;
 using Unity.Netcode;
-using Oculus.Interaction;
-using UnityEngine.Events;
 
+/// <summary>
+/// Simplified startup controller for role assignment and drone spawning.
+/// All button events are wired in the Inspector.
+/// </summary>
 public class RoleSelectorController : NetworkBehaviour
 {
-    [Header("Interactable Event Wrappers")]
-    public InteractableUnityEventWrapper assignWrapper;
-    public InteractableUnityEventWrapper clearWrapper;
-    public InteractableUnityEventWrapper startWrapper;
+    [Header("UI Buttons")] 
+    public GameObject assignButton;
+    public GameObject clearButton;
+    public GameObject startButton;
 
-    public override void OnNetworkSpawn()
+    private void Awake()
     {
-        base.OnNetworkSpawn();
-        if (!IsOwner) return;
-        var local = NetworkManager.Singleton.LocalClient;
-        if (local != null && local.PlayerObject != null)
-        {
-            var net = local.PlayerObject.GetComponent<RoleNetwork>();
-            if (net != null)
-            {
-                net.role.OnValueChanged += OnRoleChanged;
-                // Initialize Start visibility based on current role
-                if (startWrapper != null)
-                    startWrapper.gameObject.SetActive(net.role.Value == Role.Recipient);
-            }
-        }
-
-        if (assignWrapper != null) assignWrapper.WhenSelect.AddListener(OnAssignClicked);
-        if (clearWrapper  != null) clearWrapper.WhenSelect.AddListener(OnClearClicked);
-        if (startWrapper  != null) startWrapper.WhenSelect.AddListener(OnStartClicked);
-
-        // By default, Start is hidden until Recipient
-        if (startWrapper != null) startWrapper.gameObject.SetActive(false);
+        // Initial UI state: only Assign & Clear visible
+        if (assignButton != null) assignButton.SetActive(true);
+        if (clearButton  != null) clearButton.SetActive(true);
+        if (startButton  != null) startButton.SetActive(false);
     }
 
-    public override void OnNetworkDespawn()
+    /// <summary>
+    /// Called by the Assign button. Assigns this client as Recipient.
+    /// </summary>
+    public void OnAssignClicked()
     {
-        base.OnNetworkDespawn();
-        if (!IsOwner) return;
-        var local = NetworkManager.Singleton.LocalClient;
-        if (local != null && local.PlayerObject != null)
-        {
-            var net = local.PlayerObject.GetComponent<RoleNetwork>();
-            if (net != null)
-            {
-                net.role.OnValueChanged -= OnRoleChanged;
-            }
-        }
-    }
-
-    void OnAssignClicked()
-    {
+        Debug.Log($"[RoleSelectorController] OnAssignClicked called on client {NetworkManager.Singleton.LocalClientId}");
         AssignRecipientServerRpc(NetworkManager.Singleton.LocalClientId);
+        if (startButton != null) startButton.SetActive(true);
     }
 
     [ServerRpc(RequireOwnership = false)]
-    void AssignRecipientServerRpc(ulong clientId)
+    private void AssignRecipientServerRpc(ulong clientId)
     {
-        // Reset all to Bystander
+        Debug.Log($"[RoleSelectorController] AssignRecipientServerRpc invoked on server for client {clientId}");
+        // Reset all clients to Bystander
         foreach (var client in NetworkManager.Singleton.ConnectedClientsList)
         {
-            var rig = client.PlayerObject.GetComponent<RoleNetwork>();
-            if (rig != null) rig.role.Value = Role.Bystander;
+            var rn = client.PlayerObject.GetComponent<RoleNetwork>();
+            if (rn != null) rn.role.Value = Role.Bystander;
         }
-        // Set this client as Recipient
-        var target = NetworkManager.Singleton.ConnectedClients[clientId];
-        var targetRig = target.PlayerObject.GetComponent<RoleNetwork>();
-        if (targetRig != null) targetRig.role.Value = Role.Recipient;
+        // Set this client to Recipient
+        var target = NetworkManager.Singleton.ConnectedClients[clientId]
+                             .PlayerObject.GetComponent<RoleNetwork>();
+        if (target != null) target.role.Value = Role.Recipient;
     }
 
-    void OnClearClicked()
+    /// <summary>
+    /// Called by the Clear button. Clears role back to Bystander.
+    /// </summary>
+    public void OnClearClicked()
     {
         ClearRecipientServerRpc(NetworkManager.Singleton.LocalClientId);
+        if (startButton != null) startButton.SetActive(false);
     }
 
     [ServerRpc(RequireOwnership = false)]
-    void ClearRecipientServerRpc(ulong clientId)
+    private void ClearRecipientServerRpc(ulong clientId)
     {
-        var rig = NetworkManager.Singleton.ConnectedClients[clientId].PlayerObject.GetComponent<RoleNetwork>();
-        if (rig != null) rig.role.Value = Role.Bystander;
+        var rn = NetworkManager.Singleton.ConnectedClients[clientId]
+                        .PlayerObject.GetComponent<RoleNetwork>();
+        if (rn != null) rn.role.Value = Role.Bystander;
     }
 
-    void OnStartClicked()
+    /// <summary>
+    /// Called by the Start button. Spawns the drone and hides all UI.
+    /// </summary>
+    public void OnStartClicked()
     {
-        // Trigger session start (e.g. spawn drone)
-        SessionManager.Instance.StartSession();
-        if (startWrapper != null) startWrapper.gameObject.SetActive(false);
-    }
-
-    private void OnRoleChanged(Role previous, Role current)
-    {
-        if (!IsOwner) return;
-        if (startWrapper != null)
-            startWrapper.gameObject.SetActive(current == Role.Recipient);
+        // Hide UI; spawn logic handled via UnityEvent in the Inspector.
+        if (assignButton != null) assignButton.SetActive(false);
+        if (clearButton  != null) clearButton.SetActive(false);
+        if (startButton  != null) startButton.SetActive(false);
     }
 } 
