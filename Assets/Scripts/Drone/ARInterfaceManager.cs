@@ -7,11 +7,6 @@ public class ARInterfaceManager : MonoBehaviour
     [SerializeField] private GameObject _landingProbe;
     [SerializeField] private GameObject _guidancePad;
 
-    [Header("Gesture Selectors")]
-    [SerializeField] private ThumbsUpSelector _thumbsUp;
-    [SerializeField] private ThumbsDownSelector _thumbsDown;
-    [SerializeField] private PointSelector _pointAndHold;
-
     /// <summary>Fired when user confirms (👍) on the probe.</summary>
     public event Action<Vector3> OnConfirm;
     /// <summary>Fired when user rejects (👎) the probe.</summary>
@@ -24,45 +19,42 @@ public class ARInterfaceManager : MonoBehaviour
         HideAll();
     }
 
-    /// <summary>Activate probe UI and subscribe to thumbs-up/down.</summary>
+    /// <summary>Show the landing probe UI.</summary>
     public void ShowProbe()
     {
         _guidancePad.SetActive(false);
         _landingProbe.SetActive(true);
-        _thumbsUp.OnSelected += HandleConfirm;
-        _thumbsDown.OnSelected += HandleReject;
     }
 
-    /// <summary>Activate guidance pad and subscribe to point selector.</summary>
+    /// <summary>Show the guidance pad UI.</summary>
     public void ShowPad()
     {
         _landingProbe.SetActive(false);
         _guidancePad.SetActive(true);
-        _pointAndHold.OnSelected += HandleGuidance;
     }
 
-    /// <summary>Deactivate all AR cues and unsubscribe from selectors.</summary>
+    /// <summary>Hide all AR cues.</summary>
     public void HideAll()
     {
         _landingProbe.SetActive(false);
         _guidancePad.SetActive(false);
-        _thumbsUp.OnSelected -= HandleConfirm;
-        _thumbsDown.OnSelected -= HandleReject;
-        _pointAndHold.OnSelected -= HandleGuidance;
     }
 
-    private void HandleConfirm(Vector3 spot)
+    /// <summary>Called by UnityEvent when user confirms the landing spot.</summary>
+    public void HandleConfirm(Vector3 worldPoint)
     {
-        OnConfirm?.Invoke(spot);
+        OnConfirm?.Invoke(worldPoint);
     }
 
-    private void HandleReject(Vector3 spot)
+    /// <summary>Called by UnityEvent when user rejects the landing spot.</summary>
+    public void HandleReject()
     {
         OnReject?.Invoke();
     }
 
-    private void HandleGuidance(Vector3 spot)
+    /// <summary>Called by UnityEvent when user points and holds.</summary>
+    public void HandleGuidance(Vector3 worldPoint)
     {
-        OnGuidance?.Invoke(spot);
+        OnGuidance?.Invoke(worldPoint);
     }
 } 

@@ -101,7 +101,6 @@ Scripts/
 | Script | Responsibility | Key API |
 |--------|----------------|---------|
 | **TriggerCube** | Detect pickup | `PickedUp` |
-| **SessionManager** | Start session when cube picked | – |
 | **ScenarioManager** | Store IV level | `Current` |
 | **SpawnLocator** | Pick spawn pose (table > floor) | `TryGet(out, out)` |
 | **DroneSpawner** | Instantiate & network‑spawn | `Spawn(pos,rot)` |
@@ -156,7 +155,7 @@ Below you'll find
 
 | State | Enter From | Exit To | Behaviour |
 |-------|------------|---------|-----------|
-| **Idle** | Landing ➜ Idle (success) <br>Abort ➜ Idle | Hover *(on new run)* | Motors off |
+| **Idle** | Landing ➜ Idle (success) <br>Abort| Hover *(on new run)* | Motors off |
 | **Hover** *(default on spawn)* | App-Start / LandAbort | CruiseToTarget <br>Landing <br>Abort | Hold at `hoverHeight`; sway |
 | **CruiseToTarget** | Hover | Hover | `NavMeshAgent` path to `currentTarget` |
 | **Landing** | Hover (ScenarioManager `BeginLanding(spot)`) | Idle¹ <br>LandAbort | PID descent to `spot` |
@@ -251,12 +250,12 @@ This gives you a compact yet descriptive state system with clean separation of c
 
 When MRUK completes its scene scan and the shared spatial anchor is ready:
 
-1. **RoleSelectionSpawner** (Spawning/) uses `FindSpawnPositions` to drop a **RoleSelectionPanel** at the table anchor.
+a GameStartPanelSpawner in the hierarchy has the `FindSpawnPositions` to drop a **RoleSelectionPanel** at the table anchor.
 2. Each participant's **PlayerRig** has a **RoleNetwork** component (NetworkVariable<Role>, default **Bystander**).
 3. **RoleSelectorController** on the panel listens for three buttons:
    - **Assign** → calls a ServerRPC to set the pressing client's role to **Recipient** and all others to **Bystander**.
    - **Clear** → reverts the pressing client's role to **Bystander**.
-   - **Start** (revealed only once a **Recipient** is assigned) → invokes `SessionManager.StartSession()`, kicking off the drone spawn and flight FSM.
+   - **Start** (revealed only once a **Recipient** is assigned) → invokes the 'FindSpawnPositions' on the game object 'Drone spawner', kicking off the drone spawn and flight FSM.
 
 All role changes replicate via Netcode, and **RoleColliders** automatically toggles the appropriate colliders on each rig so the drone's targeting and obstacle avoidance logic know which sphere to aim for or carve around.
 
