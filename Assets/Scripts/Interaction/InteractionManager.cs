@@ -17,6 +17,8 @@ public class InteractionManager : MonoBehaviour
     [SerializeField] private GameObject _c2CueObject;  // The c2target with guidance UI
     
     [Header("Zone Indices")]
+    [Tooltip("Index of the C-0 navigation zone-target pair in the ZoneRandomizer")]
+    [SerializeField] private int _c0ZoneIndex = 2;
     [Tooltip("Index of the C-1 zone-target pair in the ZoneRandomizer")]
     [SerializeField] private int _c1ZoneIndex = 0;
     [Tooltip("Index of the C-2 zone-target pair in the ZoneRandomizer")]
@@ -61,6 +63,22 @@ public class InteractionManager : MonoBehaviour
     }
     
     #region Public Scenario Methods
+    
+    /// <summary>
+    /// Randomizes the position for C-0 navigation zone and returns the target position.
+    /// </summary>
+    public Vector3 RandomizeC0Position()
+    {
+        return _zoneRandomizer.RandomizeTargetPosition(_c0ZoneIndex);
+    }
+    
+    /// <summary>
+    /// Gets the current C-0 target position without randomizing it.
+    /// </summary>
+    public Vector3 GetC0TargetPosition()
+    {
+        return _zoneRandomizer.GetTarget(_c0ZoneIndex).position;
+    }
     
     /// <summary>
     /// Starts the C-1 Confirm scenario: randomly place cue, show UI, wait for confirm/reject.

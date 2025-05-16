@@ -20,11 +20,6 @@ public class ScenarioManager : MonoBehaviour
     [SerializeField] private DroneController _drone;
     [SerializeField] private DroneHMI _hmi;
     [SerializeField] private InteractionManager _interactionManager;
-    [SerializeField] private ZoneRandomizer _zoneRandomizer;
-
-    [Header("Navigation Zone")]
-    [Tooltip("Index of the navigation zone-target pair in the ZoneRandomizer")]
-    [SerializeField] private int _navigationZoneIndex = 2;
 
     [Header("Timings (seconds)")]
     [SerializeField] private float _initialHoverTime = 2f;
@@ -162,8 +157,7 @@ public class ScenarioManager : MonoBehaviour
         yield return new WaitForSeconds(_initialHoverTime);
 
         // 2. Cruise to first navigation point
-        _zoneRandomizer.RandomizeTargetPosition(_navigationZoneIndex);
-        Vector3 navPoint = _zoneRandomizer.GetTarget(_navigationZoneIndex).position;
+        Vector3 navPoint = _interactionManager.RandomizeC0Position();
         _drone.StartCruiseTo(navPoint);
         yield return new WaitForSeconds(_cruiseTime);
 
@@ -174,7 +168,7 @@ public class ScenarioManager : MonoBehaviour
         for (int i = 0; i < 2; i++)
         {
             // a) Begin a short landing
-            Vector3 landingSpot = _zoneRandomizer.GetTarget(_navigationZoneIndex).position;
+            Vector3 landingSpot = _interactionManager.GetC0TargetPosition();
             landingSpot.y -= _landingDepth;
             _drone.BeginLanding(landingSpot);
 
@@ -193,8 +187,7 @@ public class ScenarioManager : MonoBehaviour
             // e) On first loop, reposition and cruise again
             if (i == 0)
             {
-                _zoneRandomizer.RandomizeTargetPosition(_navigationZoneIndex);
-                Vector3 newNavPoint = _zoneRandomizer.GetTarget(_navigationZoneIndex).position;
+                Vector3 newNavPoint = _interactionManager.RandomizeC0Position();
                 _drone.StartCruiseTo(newNavPoint);
                 yield return new WaitForSeconds(_cruiseTime);
                 yield return new WaitForSeconds(_initialHoverTime);

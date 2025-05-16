@@ -1336,10 +1336,11 @@ MonoBehaviour:
   _droneController: {fileID: 1810468394022374458}
   _c1CueObject: {fileID: 5462421731827558186}
   _c2CueObject: {fileID: 3061449790828596275}
+  _c0ZoneIndex: 0
   _c1ZoneIndex: 0
   _c2ZoneIndex: 1
-  _autoRejectTime: 10
-  _guidanceMaxTime: 20
+  _autoRejectTime: 30
+  _guidanceMaxTime: 30
 --- !u!114 &2765169891800712920
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2218,14 +2219,12 @@ MonoBehaviour:
   _drone: {fileID: 1810468394022374458}
   _hmi: {fileID: 1607202606177074999}
   _interactionManager: {fileID: 363029138362738291}
-  _zoneRandomizer: {fileID: 2765169891800712920}
-  _navigationZoneIndex: 2
-  _initialHoverTime: 2
-  _cruiseTime: 3
-  _landingWaitTime: 1
-  _postAbortHoverTime: 2
+  _initialHoverTime: 6
+  _cruiseTime: 5
+  _landingWaitTime: 5
+  _postAbortHoverTime: 5
   _landingDepth: 1
-  _scenarioDelay: 2
+  _scenarioDelay: 5
 --- !u!114 &1990189080372474160
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2277,7 +2276,7 @@ MonoBehaviour:
   _cruiseSpeed: 3
   _abortClimbHeight: 8
   _c0Timeout: 5
-  _rotorSpeed: 360
+  _rotorSpeed: 4000
   _legRetractedAngle: 30
   _legRotateSpeed: 90
   _landingDescentSpeed: 2
