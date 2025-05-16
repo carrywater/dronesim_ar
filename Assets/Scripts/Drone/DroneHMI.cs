@@ -38,6 +38,7 @@ public class DroneHMI : MonoBehaviour
 
         // Trigger LED animation state
         _ledAnimator.ResetTrigger("Idle");
+  
         _ledAnimator.ResetTrigger("Uncertain");
         _ledAnimator.ResetTrigger("PromptConfirm");
         _ledAnimator.ResetTrigger("PromptGuide");

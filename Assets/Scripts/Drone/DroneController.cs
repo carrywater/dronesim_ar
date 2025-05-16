@@ -5,9 +5,9 @@ public class DroneController : MonoBehaviour
 {
     // Serialized references to other layers
     [Header("References")]
-    [SerializeField] private DroneNavigation _navigation;       // for nav & arrival callbacks
+    [SerializeField] private DroneArrivalDetector _navigation;       // for arrival callbacks
     [SerializeField] private DroneHMI _hmi;                     // for LED & audio feedback
-    [SerializeField] private ARInterfaceManager _arInterface;   // for AR probe & pad UI
+    [SerializeField] private InteractionManager _arInterface;   // for AR cues and interactions
 
     [Header("Propellers")]
     [SerializeField] private Transform[] _propellers;           // assign 8 propeller transforms
@@ -25,7 +25,7 @@ public class DroneController : MonoBehaviour
 
     [Header("Flight Settings")]
     [SerializeField] private float _hoverHeight = 6f;
-    [SerializeField] private float _hoverAscendSpeed = 2f;    // speed to ascend to hover height
+    [SerializeField] private float _hoverMovementSpeed = 2f;  // speed factor for smooth ascend/descend to hover
     [SerializeField] private float _cruiseSpeed = 3f;
     [SerializeField] private float _abortClimbHeight = 8f;
     [SerializeField] private float _c0Timeout = 5f;
@@ -41,7 +41,7 @@ public class DroneController : MonoBehaviour
     private Vector3 _cruiseTargetPosition;
     private Transform _cruiseTargetTransform;
     private Vector3 _landingSpot;
-    private bool _isAscendingHover;  // tracks smooth ascend to hover height
+    private bool _isAscendingHover;  // tracks smooth ascend/descend to hover height
 
     // Internal state
     private Coroutine _c0Coroutine;
@@ -62,16 +62,15 @@ public class DroneController : MonoBehaviour
 
     private void Update()
     {
-        // handle smooth ascend into hover state
+        // smooth ascend/descend into hover state
         if (_state == FlightState.Hover && _isAscendingHover)
         {
             Vector3 pos = transform.position;
             Vector3 target = new Vector3(pos.x, _hoverHeight, pos.z);
-            transform.position = Vector3.MoveTowards(pos, target, _hoverAscendSpeed * Time.deltaTime);
+            transform.position = Vector3.Lerp(pos, target, Time.deltaTime * _hoverMovementSpeed);
             if (Mathf.Abs(transform.position.y - _hoverHeight) < 0.01f)
             {
                 _isAscendingHover = false;
-                // now start the C-0 abort timer
                 _c0Coroutine = StartCoroutine(C0AbortTimer());
             }
         }
@@ -89,7 +88,8 @@ public class DroneController : MonoBehaviour
         switch (_state)
         {
             case FlightState.CruiseToTarget:
-                // arrival handled via callback
+                // Handle direct cruise movement now that we're not using NavMesh
+                PerformCruise();
                 break;
             case FlightState.Landing:
                 PerformLanding();
@@ -119,6 +119,15 @@ public class DroneController : MonoBehaviour
     {
         _cruiseTargetTransform = targetTransform;
         _cruiseTargetPosition = targetTransform.position;
+    }
+
+    /// <summary>
+    /// Begin cruising to any arbitrary world position.
+    /// </summary>
+    public void StartCruiseTo(Vector3 position)
+    {
+        SetCruiseTarget(position);
+        TransitionToState(FlightState.CruiseToTarget);
     }
 
     /// <summary>
@@ -167,6 +176,23 @@ public class DroneController : MonoBehaviour
         TransitionToState(FlightState.Abort);
     }
 
+    /// <summary>
+    /// Forces the drone to return to hover state regardless of its current state.
+    /// Used for scenario transitions and reset.
+    /// </summary>
+    public void ReturnToHover()
+    {
+        // Cancel any active scenario timers
+        if (_c0Coroutine != null)
+        {
+            StopCoroutine(_c0Coroutine);
+            _c0Coroutine = null;
+        }
+        
+        // Force transition to hover regardless of current state
+        TransitionToState(FlightState.Hover);
+    }
+
     private void TransitionToState(FlightState newState)
     {
         // exit logic
@@ -202,22 +228,19 @@ public class DroneController : MonoBehaviour
         StartGearAnimation(0f);
         _pidController.enabled = false;
         _hmi.StopHoverHum();
-        _arInterface.HideAll();
+        _arInterface.HideAllInteractions();
     }
 
     private void EnterHover()
     {
-        // begin smooth ascend to hover height
+        // begin smooth ascend/descend to hover height
         _isAscendingHover = true;
 
-        // start motors, retract gear, start sway, uncertainty tone
+        // start motors, retract gear, start sway, rotor hum
         _rotorsSpinning = true;
         StartGearAnimation(_legRetractedAngle);
         _pidController.enabled = true;
         _hmi.PlayHoverHum();
-        _hmi.PlayUncertainty();
-
-        // C-0 abort timer will start after ascend completes
     }
 
     private IEnumerator C0AbortTimer()
@@ -228,9 +251,13 @@ public class DroneController : MonoBehaviour
 
     private void EnterCruise()
     {
-        // navigate to target
-        _pidController.enabled = false;
+        // Start rotors, retract gear, enable sway and rotor hum
+        _rotorsSpinning = true;
+        StartGearAnimation(_legRetractedAngle);
+        _pidController.enabled = true;
         _hmi.PlayHoverHum();
+        
+        // Set destination for arrival detection only (movement handled by PerformCruise)
         _navigation.SetDestination(_cruiseTargetPosition, _cruiseSpeed);
         _navigation.OnArrived += OnCruiseArrived;
     }
@@ -242,44 +269,50 @@ public class DroneController : MonoBehaviour
 
     private void EnterLanding()
     {
-        // stop motors, play landing cue
+        // stop motors (rotor hum off), but maintain sway
         _rotorsSpinning = false;
         _hmi.StopHoverHum();
+        _pidController.enabled = true;
     }
 
     private void PerformLanding()
     {
-        transform.position = Vector3.MoveTowards(transform.position, _landingSpot, _landingDescentSpeed * Time.deltaTime);
+        // smooth landing descent
+        transform.position = Vector3.Lerp(transform.position, _landingSpot, Time.deltaTime * _landingDescentSpeed);
         if (Vector3.Distance(transform.position, _landingSpot) < 0.1f)
             TransitionToState(FlightState.Idle);
     }
 
     private void EnterLandAbort()
     {
-        // resume climb to hover
+        // resume rotor hum for climb-back, maintain sway
         _rotorsSpinning = false;
         _hmi.PlayHoverHum();
+        _pidController.enabled = true;
     }
 
     private void PerformLandAbort()
     {
+        // smooth climb back to hover height
         var target = new Vector3(transform.position.x, _hoverHeight, transform.position.z);
-        transform.position = Vector3.MoveTowards(transform.position, target, _landingDescentSpeed * Time.deltaTime);
+        transform.position = Vector3.Lerp(transform.position, target, Time.deltaTime * _landingDescentSpeed);
         if (Mathf.Abs(transform.position.y - _hoverHeight) < 0.1f)
             TransitionToState(FlightState.Hover);
     }
 
     private void EnterAbort()
     {
-        // abort climb and despawn
+        // full abort climb to altitude, maintain sway
         _rotorsSpinning = false;
         _hmi.StopHoverHum();
+        _pidController.enabled = true;
     }
 
     private void PerformAbort()
     {
+        // smooth climb to abort altitude
         var target = new Vector3(transform.position.x, _abortClimbHeight, transform.position.z);
-        transform.position = Vector3.MoveTowards(transform.position, target, _cruiseSpeed * Time.deltaTime);
+        transform.position = Vector3.Lerp(transform.position, target, Time.deltaTime * _cruiseSpeed);
         if (transform.position.y >= _abortClimbHeight - 0.1f)
             Destroy(gameObject);
     }
@@ -310,5 +343,17 @@ public class DroneController : MonoBehaviour
                 done = false;
         }
         if (done) _gearAnimating = false;
+    }
+
+    /// <summary>
+    /// Perform direct cruise movement toward target position
+    /// </summary>
+    private void PerformCruise()
+    {
+        // Move directly toward cruise target position at hover height
+        transform.position = Vector3.MoveTowards(
+            transform.position, 
+            new Vector3(_cruiseTargetPosition.x, _hoverHeight, _cruiseTargetPosition.z), 
+            _cruiseSpeed * Time.deltaTime);
     }
 }

@@ -1,131 +1,113 @@
-# Drone Delivery AR Simulation
+# Drone AR Simulation Framework
 
-A research-driven interactive AR experience that simulates drone deliveries in public spaces. The goal is to evaluate how human recipients respond to operational uncertainty in drone behavior, with both recipients and bystanders participating simultaneously in a synchronized mixed-reality environment.
+This framework simulates drone behavior for human-drone interaction research with three core scenarios:
+- **C-0** (High Autonomy/Abort): Drone attempts landing autonomously, but aborts due to uncertainty
+- **C-1** (Confirm): User confirms or rejects drone landing spots using thumbs up/down gestures
+- **C-2** (Guidance): User provides direct spatial guidance to the drone
 
-## Project Architecture
+## Architecture
 
-### Core Components
+### Component Hierarchy
 
-1. **Interaction System**
-   - **Recipient and Bystander Objects** (`CubeInteraction.cs`)
-     - Interactive cubes that players pick up
-     - Change color when picked up
-     - Trigger scenario selection when both are picked up simultaneously
-     - Uses NetworkVariable for synchronized pickup state
+```
+drone4 (prefab)
+├── Drone Offset (visuals)
+│   ├── Rotors
+│   ├── Legs
+│   ├── HMI
+│   └── Other visual components
+└── Zone
+    ├── NavigationZone
+    │   └── c0target
+    └── InteractionZone
+        ├── c1target
+        │   └── c1CueOffset (thumbs up/down UI)
+        └── c2target
+```
 
-2. **Scenario Management System**
-   - **Scenario Manager** (`ScenarioManager.cs`)
-     - Manages the logic for different disruption levels
-     - Randomly selects a scenario when both cubes are picked up
-     - Handles scenario transitions
-     - Communicates with the Drone Manager
+### Component Responsibilities
 
-3. **Drone System**
-   - **Drone Spawner** (`DroneSpawner.cs`)
-     - Solely responsible for spawning the drone in the environment
-     - Uses AR Surface Detection to find suitable spawn locations
-     - Does not handle navigation or behavior
-
-   - **Drone Navigator** (`DroneNavigator.cs`)
-     - Handles all navigation-related functionality
-     - Uses NavMesh to navigate the drone to the recipient's position
-     - Communicates with the Drone Manager for state changes
-
-   - **Drone Manager** (`DroneManager.cs`)
-     - Controls the drone's state and behaviors based on the scenario
-     - Handles state transitions during flight
-     - Implements scenario-specific landing behavior
-     - Acts as the central coordinator for drone behavior
-
-4. **Gesture System**
-   - **Gesture Recognizer** (`GestureRecognizer.cs`)
-     - Detects and interprets user gestures
-     - Communicates with the Drone Manager for gesture-based interactions
-
-### Scenarios
-
-1. **No Disturbance (Low Involvement)**
-   - Drone completes delivery fully autonomously
-   - No user input required
-
-2. **Moderate Disturbance (Moderate Involvement)**
-   - Drone pauses to request confirmation via gesture
-   - User must acknowledge and approve landing
-
-3. **Major Disturbance (High Involvement)**
-   - Drone requires recipient to point to a safe landing zone
-   - User uses hand tracking to point and raycast target location
-
-## Component Responsibilities
-
-### Interaction System
-- **CubeInteraction**: Handles user interaction with cubes, color changes, and triggering scenario selection
-- **NetworkManager**: Manages network connections and synchronization
-
-### Scenario Management System
-- **ScenarioManager**: Selects and manages scenarios, communicates with DroneManager
-- **ScenarioData**: Contains data structures for different scenarios
-
-### Drone System
-- **DroneSpawner**: Only responsible for spawning the drone at the appropriate location
-- **DroneNavigator**: Handles all navigation logic using NavMesh
-- **DroneManager**: Controls drone state and behavior based on the current scenario
-- **DroneVisuals**: Manages visual feedback (lights, animations) based on drone state
-
-### Gesture System
-- **GestureRecognizer**: Detects and interprets user gestures
-- **GestureHandler**: Processes recognized gestures and communicates with other systems
+| Component | Responsibility | Key Features |
+|-----------|---------------|--------------|
+| **DroneController** | Flight state machine & movement | Idle, Hover, CruiseToTarget, Landing, LandAbort, Abort states |
+| **DroneArrivalDetector** | Detects arrival at destinations | Signals when drone has reached cruise target |
+| **DroneHMI** | LED animations and audio cues | Status indicator for drone intentions |
+| **InteractionManager** | Interaction zones and AR UI | Controls UI cues and handles user interactions |
+| **ZoneRandomizer** | Randomizes targets in zones | Multiple zone-target pairs |
+| **ScenarioManager** | Orchestrates all scenarios | Sequentially runs C-0, C-1, C-2 |
+| **PIDController** | Subtle position sway | Creates realistic drone hovering |
 
 ## Setup Instructions
 
-1. **Scene Setup**
-   - Create an empty scene
-   - Add a plane or other surface for the drone to land on
-   - Create two cubes for the Recipient and Bystander
-   - Add the `CubeInteraction` script to both cubes
-   - Set the `objectType` field to "Recipient" and "Bystander" respectively
-   - Add a NavMesh to the scene for drone navigation
+1. **ZoneRandomizer Setup**:
+   - Add to the root `Zone` GameObject
+   - In the inspector, create Zone-Target pairs:
+     - Pair 0: Name: "C1", Zone Transform: InteractionZone, Target: c1target
+     - Pair 1: Name: "C2", Zone Transform: InteractionZone, Target: c2target
+     - Pair 2: Name: "C0", Zone Transform: NavigationZone, Target: c0target
 
-2. **Drone Setup**
-   - Create a drone prefab with the following components:
-     - `DroneManager` script (central coordinator)
-     - `DroneNavigator` script (handles navigation)
-     - `DroneVisuals` script (handles visual feedback)
-     - `NavMeshAgent` component (used by DroneNavigator)
-     - Mesh renderer and collider
-   - Add the drone prefab to the `DroneSpawner` script
+2. **InteractionManager Setup**:
+   - Add to the InteractionZone GameObject
+   - Assign references:
+     - ZoneRandomizer: reference to the ZoneRandomizer above
+     - DroneController: reference to the drone controller
+     - C1CueObject: the c1target/c1CueOffset with thumbs up/down UI
+     - C2CueObject: the c2target guidance UI
+   - Set Zone Indices:
+     - C1 Zone Index: 0
+     - C2 Zone Index: 1
 
-3. **Manager Setup**
-   - Add the `ScenarioManager` script to an empty GameObject
-   - Add the `DroneSpawner` script to an empty GameObject
-   - Set the `dronePrefab` field in the `DroneSpawner` script
+3. **Connect UI Events**:
+   - On the thumbs up button (in c1CueOffset):
+     - Add OnClick event calling InteractionManager.HandleConfirm with c1target position
+   - On the thumbs down button:
+     - Add OnClick event calling InteractionManager.HandleReject
 
-4. **Gesture System Setup**
-   - Add the `GestureRecognizer` script to an empty GameObject
-   - Configure gesture detection settings
+4. **ScenarioManager Setup**:
+   - Add to the drone GameObject
+   - Assign references:
+     - Drone: reference to the DroneController
+     - HMI: reference to the DroneHMI
+     - InteractionManager: reference to the InteractionManager
+     - ZoneRandomizer: reference to the ZoneRandomizer
+   - Set Navigation Zone Index: 2
 
-5. **Networking Setup**
-   - Ensure the scene is set up for networking with Unity Netcode for GameObjects
-   - Set up the host and client connections
+## Changes to Note
 
-## Usage
+The original architecture had separate components for:
+- **ARInterfaceManager**: Handled AR UI elements
+- **InteractionZoneController**: Managed interaction zones and scenarios
 
-1. **Starting the Simulation**
-   - Start the scene as a host
-   - Connect clients as Recipient and Bystander
-   - Both players pick up their respective cubes
-   - The scenario is randomly selected and the drone spawns
+These have been combined into a single **InteractionManager** for simplicity:
+- Provides clearer responsibility boundaries
+- Simplifies connections between components
+- Reduces the need for cross-component event handlers
 
-2. **Interacting with the Drone**
-   - The drone flies to the recipient's position
-   - Based on the scenario, the drone will:
-     - Land autonomously (No Disturbance)
-     - Request confirmation (Moderate Disturbance)
-     - Request guidance (Major Disturbance)
+## Workflow
 
-3. **Completing the Delivery**
-   - The drone lands at the specified location
-   - The delivery is complete when the drone reaches the landing position
+1. When the scene starts, ScenarioManager runs the C-0 scenario
+2. After C-0 completes, it transitions to C-1 (confirm landing spot)
+3. When C-1 completes, it transitions to C-2 (guidance)
+4. Each scenario uses the InteractionManager to handle UI and user inputs
+
+## Scenario Details
+
+### C-0 (High Autonomy/Abort)
+- Drone cruises to random points in NavigationZone
+- Attempts landing, signals uncertainty, aborts
+- After two attempts, performs full mission abort
+
+### C-1 (Confirm)
+- Drone cruises to InteractionZone
+- Landing probe appears at random position
+- User confirms with thumbs up or rejects with thumbs down
+- On rejection, a new random position is selected
+
+### C-2 (Guidance)
+- Drone cruises to InteractionZone
+- Guidance pad appears
+- User provides direct spatial guidance
+- Drone follows guidance until timeout/completion
 
 ## Development Notes
 

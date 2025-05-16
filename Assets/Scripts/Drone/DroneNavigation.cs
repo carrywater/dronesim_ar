@@ -1,44 +1,39 @@
 using UnityEngine;
-using UnityEngine.AI;
 using System;
 
-public class DroneNavigation : MonoBehaviour
+public class DroneArrivalDetector : MonoBehaviour
 {
-    [Header("Agent Settings")]
-    [SerializeField] private NavMeshAgent _agent;
-    [SerializeField] private float _fallbackSpeed = 3f;
-
-    public event Action OnArrived;
+    [Header("Arrival Settings")]
+    [SerializeField] private float _arrivalThreshold = 0.1f;
+    
+    private Vector3 _currentDestination;
+    private bool _isTracking;
     private bool _hasArrivedInvoked;
-
+    
+    public event Action OnArrived;
+    
     /// <summary>
-    /// Set a new destination and travel speed for the drone.
+    /// Set a new destination for the drone to track arrival.
+    /// Speed parameter kept for compatibility with existing interface.
     /// </summary>
     public void SetDestination(Vector3 position, float speed)
     {
-        if (_agent != null && _agent.isOnNavMesh)
-        {
-            _hasArrivedInvoked = false;
-            _agent.speed = speed;
-            _agent.SetDestination(position);
-        }
-        else
-        {
-            // Fallback movement could be implemented here
-        }
+        _currentDestination = position;
+        _isTracking = true;
+        _hasArrivedInvoked = false;
     }
-
+    
     private void Update()
     {
-        if (_agent != null && _agent.hasPath && !_agent.pathPending)
+        if (_isTracking && !_hasArrivedInvoked)
         {
-            if (!_hasArrivedInvoked && _agent.remainingDistance <= _agent.stoppingDistance)
+            // Check if drone has reached destination
+            if (Vector3.Distance(transform.position, _currentDestination) <= _arrivalThreshold)
             {
                 _hasArrivedInvoked = true;
+                _isTracking = false;
                 OnArrived?.Invoke();
             }
         }
     }
-
-    // TODO: Implement drone navigation logic (agent pathing, fallback movement)
 } 
