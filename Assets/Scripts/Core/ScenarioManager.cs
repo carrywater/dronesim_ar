@@ -20,6 +20,26 @@ public class ScenarioManager : MonoBehaviour
     [SerializeField] private DroneController _drone;
     [SerializeField] private DroneHMI _hmi;
     [SerializeField] private InteractionManager _interactionManager;
+    
+    [Header("Confidence Settings")]
+    [Tooltip("Threshold required for successful landing (0-1)")]
+    [Range(0f, 1f)]
+    [SerializeField] private float _landingConfidenceThreshold = 0.9f;
+    
+    [Tooltip("Base confidence for C0 scenario (always below threshold)")]
+    [Range(0f, 1f)]
+    [SerializeField] private float _c0BaseConfidence = 0.65f;
+    
+    [Tooltip("Additional confidence gained on second landing attempt")]
+    [Range(0f, 0.3f)]
+    [SerializeField] private float _c0SecondAttemptBonus = 0.1f;
+    
+    [Tooltip("Maximum number of landing attempts before final abort")]
+    [Range(1, 3)]
+    [SerializeField] private int _maxLandingAttempts = 2;
+    
+    [Tooltip("Whether to display confidence values for debugging")]
+    [SerializeField] private bool _showConfidenceDebug = true;
 
     [Header("Timings (seconds)")]
     [SerializeField] private float _initialHoverTime = 2f;
@@ -28,6 +48,9 @@ public class ScenarioManager : MonoBehaviour
     [SerializeField] private float _postAbortHoverTime = 2f;
     [SerializeField] private float _landingDepth = 1f;  // how far below the hover height to descend during abort landing
     [SerializeField] private float _scenarioDelay = 2f; // delay between scenarios
+    
+    [Header("UI Feedback (Optional)")]
+    [SerializeField] private TMPro.TextMeshProUGUI _confidenceText;
 
     private bool _scenarioRunning = false;
 
@@ -108,6 +131,29 @@ public class ScenarioManager : MonoBehaviour
         {
             StartCoroutine(RunScenarioSequence());
         }
+    }
+
+    // Helper method to display confidence
+    private void UpdateConfidenceDisplay(float confidence)
+    {
+        if (_showConfidenceDebug)
+        {
+            Debug.Log($"Landing confidence: {confidence:F2}, Threshold: {_landingConfidenceThreshold:F2}");
+            
+            if (_confidenceText != null)
+            {
+                _confidenceText.text = $"Confidence: {confidence:P0}";
+                _confidenceText.color = confidence >= _landingConfidenceThreshold ? 
+                    Color.green : (confidence > _landingConfidenceThreshold * 0.8f ? Color.yellow : Color.red);
+            }
+        }
+    }
+    
+    // Helper method to evaluate if landing should proceed
+    private bool EvaluateLandingConfidence(float confidence)
+    {
+        UpdateConfidenceDisplay(confidence);
+        return confidence >= _landingConfidenceThreshold;
     }
 
     private IEnumerator RunSelectedScenario()
@@ -197,13 +243,25 @@ public class ScenarioManager : MonoBehaviour
         // Reset HMI state
         _hmi.SetStatus(DroneHMI.HMIState.Idle);
         
+        // Stop any hover hum for a clean start
+        _hmi.StopHoverHum();
+        
         // If the drone is in an abort or landing state, return it to hover
         _drone.ReturnToHover();
+        
+        // Ensure legs are extended at the start of any scenario
+        _drone.ExtendLegs();
         
         // Hide any interaction elements
         if (_interactionManager != null)
         {
             _interactionManager.HideAllInteractions();
+        }
+        
+        // Reset confidence display
+        if (_confidenceText != null)
+        {
+            _confidenceText.text = "";
         }
     }
 
@@ -213,6 +271,10 @@ public class ScenarioManager : MonoBehaviour
 
         // 1. Gentle descent to hover height
         // The drone already transitions to hover state in ResetDroneState()
+        
+        // Start hover hum immediately and keep it running throughout the scenario
+        _hmi.PlayHoverHum();
+        
         // Just wait for it to reach hover height
         yield return new WaitForSeconds(_initialHoverTime);
         
@@ -221,10 +283,29 @@ public class ScenarioManager : MonoBehaviour
         
         // Wait in hover while facing participant
         yield return new WaitForSeconds(_initialHoverTime);
-
-        // 3. Perform two land-abort loops
-        for (int i = 0; i < 2; i++)
+        
+        // Retract legs before starting flight loop
+        _drone.RetractLegs();
+        
+        // Wait for legs to fully retract
+        while (_drone.AreLegsAnimating())
         {
+            yield return null;
+        }
+
+        // 3. Perform landing attempts (maximum of 2)
+        for (int attemptCount = 0; attemptCount < _maxLandingAttempts; attemptCount++)
+        {
+            // Calculate this attempt's confidence (slightly higher on 2nd attempt)
+            float currentConfidence = _c0BaseConfidence;
+            if (attemptCount > 0)
+            {
+                currentConfidence += _c0SecondAttemptBonus;
+            }
+            
+            // Show the confidence early so user can see it
+            UpdateConfidenceDisplay(currentConfidence);
+            
             // 3.1 Randomize cruise location
             Vector3 navPoint = _interactionManager.RandomizeC0Position();
             
@@ -235,34 +316,60 @@ public class ScenarioManager : MonoBehaviour
             // 3.2.1 Wait at new location
             yield return new WaitForSeconds(_initialHoverTime);
             
-            // 3.3 Attempt to land but stop at the lowest point
+            // 3.3 Extend legs for landing
+            _drone.ExtendLegs();
+            
+            // Wait a moment for legs to start extending before beginning descent
+            yield return new WaitForSeconds(0.5f);
+            
+            // 3.4 Attempt to land but stop at the lowest point
             Vector3 landingSpot = _interactionManager.GetC0TargetPosition();
             landingSpot.y -= _landingDepth;
             _drone.BeginLanding(landingSpot);
             
-            // Play hover hum during landing attempt
-            _hmi.PlayHoverHum();
+            // No need to play hover hum again as it's already playing
             yield return new WaitForSeconds(_landingWaitTime);
             
-            // 3.4 Communicate uncertainty (play sound and flash lights)
+            // 3.5 Check confidence again - evaluate and communicate uncertainty
+            bool confidenceOK = EvaluateLandingConfidence(currentConfidence);
+            
+            // In C0, we ensure the confidence is always below threshold
+            Debug.Assert(!confidenceOK, "C0 scenario should always have confidence below threshold!");
+            
+            // Signal uncertainty with the uncertainty animation but using low confidence sound
+            // (we've updated DroneHMI to use low confidence sound for Uncertain state)
             _hmi.SetStatus(DroneHMI.HMIState.Uncertain);
             
-            // Maintain hover hum during uncertainty
-            _hmi.PlayHoverHum();
+            // Maintain hover hum during uncertainty (no need to call again, it's already running)
             yield return new WaitForSeconds(_landingWaitTime);
             
-            // 3.5 Raise back up to hover height
+            // 3.6 Raise back up to hover height (abort this landing attempt)
             _drone.LandAbort();
+            
+            // Retract legs during abort
+            _drone.RetractLegs();
+            
             yield return new WaitForSeconds(_postAbortHoverTime);
             
             // Reset HMI state after uncertainty
             _hmi.SetStatus(DroneHMI.HMIState.Idle);
             
-            // Ensure hover hum continues
-            _hmi.PlayHoverHum();
+            // No need to call PlayHoverHum again, it's already playing
+        }
+        
+        // Make sure legs are retracted before final abort
+        if (!_drone.AreLegsRetracted())
+        {
+            _drone.RetractLegs();
+            
+            // Wait for legs to fully retract
+            while (_drone.AreLegsAnimating())
+            {
+                yield return null;
+            }
         }
 
-        // 4. After two attempts, perform full abort sequence
+        // 4. After configured attempts, perform full abort sequence
         
         // 4.1 Communicate abort mission
         _hmi.SetStatus(DroneHMI.HMIState.Abort);
@@ -273,8 +380,14 @@ public class ScenarioManager : MonoBehaviour
         // 4.3 Abort mission (rise up while keeping rotors on)
         _drone.Abort();
         
-        // Keep hover hum during abort flight
-        _hmi.PlayHoverHum();
+        // Hover hum is already playing - no need to start it again
+        
+        // Update confidence display to show final decision
+        if (_confidenceText != null)
+        {
+            _confidenceText.text = "Mission Aborted - Insufficient Confidence";
+            _confidenceText.color = Color.red;
+        }
         
         Debug.Log("Completed C-0 Scenario");
     }
@@ -282,6 +395,13 @@ public class ScenarioManager : MonoBehaviour
     private IEnumerator RunC1Scenario()
     {
         Debug.Log("Starting C-1 Scenario (Confirm)");
+        
+        // Clear any previous confidence display
+        if (_confidenceText != null)
+        {
+            _confidenceText.text = "Awaiting User Confirmation";
+            _confidenceText.color = Color.yellow;
+        }
         
         // 1. Move drone to interaction zone
         Vector3 interactionPos = _interactionManager.transform.position;
@@ -298,12 +418,26 @@ public class ScenarioManager : MonoBehaviour
             yield return null;
         }
         
+        // Update confidence to show success after user confirmation
+        if (_confidenceText != null)
+        {
+            _confidenceText.text = "Confidence: 100% (User Confirmed)";
+            _confidenceText.color = Color.green;
+        }
+        
         Debug.Log("Completed C-1 Scenario");
     }
     
     private IEnumerator RunC2Scenario()
     {
         Debug.Log("Starting C-2 Scenario (Guidance)");
+        
+        // Clear any previous confidence display
+        if (_confidenceText != null)
+        {
+            _confidenceText.text = "Awaiting User Guidance";
+            _confidenceText.color = Color.yellow;
+        }
         
         // 1. Move drone to interaction zone
         Vector3 interactionPos = _interactionManager.transform.position;
@@ -318,6 +452,13 @@ public class ScenarioManager : MonoBehaviour
         while (!_interactionManager.IsC2Completed)
         {
             yield return null;
+        }
+        
+        // Update confidence to show success after user guidance
+        if (_confidenceText != null)
+        {
+            _confidenceText.text = "Confidence: 95% (User Guided)";
+            _confidenceText.color = Color.green;
         }
         
         Debug.Log("Completed C-2 Scenario");

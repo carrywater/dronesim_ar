@@ -674,7 +674,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0.011250019, y: -1.699996, z: -0.0027499944}
-  m_LocalScale: {x: 0.25, y: 75, z: 0.25}
+  m_LocalScale: {x: 0.25, y: 80.7, z: 0.25}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 5782286295735504812}
@@ -1204,7 +1204,7 @@ MeshRenderer:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 4099390676045322933}
-  m_Enabled: 1
+  m_Enabled: 0
   m_CastShadows: 1
   m_ReceiveShadows: 1
   m_DynamicOccludee: 1
@@ -2118,7 +2118,7 @@ Transform:
   m_GameObject: {fileID: 6555562399144133326}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -0.0117938155, y: 0.636, z: 0.268058}
+  m_LocalPosition: {x: -0.0117938155, y: 10, z: 0.268058}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -2219,12 +2219,18 @@ MonoBehaviour:
   _drone: {fileID: 1810468394022374458}
   _hmi: {fileID: 1607202606177074999}
   _interactionManager: {fileID: 363029138362738291}
+  _landingConfidenceThreshold: 0.9
+  _c0BaseConfidence: 0.65
+  _c0SecondAttemptBonus: 0.1
+  _maxLandingAttempts: 2
+  _showConfidenceDebug: 1
   _initialHoverTime: 6
   _cruiseTime: 5
   _landingWaitTime: 5
   _postAbortHoverTime: 5
   _landingDepth: 1
   _scenarioDelay: 5
+  _confidenceText: {fileID: 0}
 --- !u!114 &1990189080372474160
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2251,7 +2257,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _navigation: {fileID: 2636591311930403196}
-  _arInterface: {fileID: 363029138362738291}
   _propellers:
   - {fileID: 9219322242575945537}
   - {fileID: 7436476895176237127}
@@ -2266,6 +2271,7 @@ MonoBehaviour:
   - {fileID: 8896493965928131690}
   - {fileID: 5411071973900510021}
   - {fileID: 8000699972817935668}
+  _legRotationTypes: 03000000040000000100000000000000
   _pidController: {fileID: 7979496425104685686}
   _cruiseMovementCurve:
     serializedVersion: 2
@@ -2320,21 +2326,30 @@ MonoBehaviour:
     m_Curve:
     - serializedVersion: 3
       time: 0
-      value: 0
-      inSlope: 0
-      outSlope: 0
+      value: 0.0015869141
+      inSlope: 0.005897067
+      outSlope: 0.005897067
       tangentMode: 0
       weightedMode: 0
       inWeight: 0
-      outWeight: 0
+      outWeight: 1
+    - serializedVersion: 3
+      time: 0.5352812
+      value: 0.11047162
+      inSlope: 0.6611198
+      outSlope: 0.6611198
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.08614379
+      outWeight: 0.26478845
     - serializedVersion: 3
       time: 1
-      value: 1
-      inSlope: 0
-      outSlope: 0
+      value: 0.99842834
+      inSlope: -0.015723702
+      outSlope: -0.015723702
       tangentMode: 0
       weightedMode: 0
-      inWeight: 0
+      inWeight: 0.100000024
       outWeight: 0
     m_PreInfinity: 2
     m_PostInfinity: 2
@@ -2351,9 +2366,9 @@ MonoBehaviour:
   _cruiseSpeed: 3
   _abortClimbHeight: 20
   _c0Timeout: 5
-  _rotorSpeed: 4000
-  _legRetractedAngle: 0
-  _legRotateSpeed: 0
+  _rotorSpeed: 6000
+  _legRetractedAngle: 30
+  _legRotateSpeed: 2
   _landingDescentSpeed: 1
 --- !u!114 &7979496425104685686
 MonoBehaviour:
@@ -2651,7 +2666,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0.011250019, y: -1.699996, z: -0.0027499944}
-  m_LocalScale: {x: 0.25, y: 100, z: 0.25}
+  m_LocalScale: {x: 1, y: 100, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 922766828717719821}

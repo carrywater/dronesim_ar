@@ -11,7 +11,6 @@ public class DroneHMI : MonoBehaviour
 
     [Header("One-Shot Audio")]
     [SerializeField] private AudioSource _oneShotSource;      // Loop = false
-    [SerializeField] private AudioClip   _uncertaintyClip;
     [SerializeField] private AudioClip   _gestureAcceptClip;
     [SerializeField] private AudioClip   _lowConfidenceClip;
     [SerializeField] private AudioClip   _mediumConfidenceClip;
@@ -53,9 +52,7 @@ public class DroneHMI : MonoBehaviour
                 break;
             case HMIState.Uncertain:
                 _ledAnimator.SetTrigger("Uncertain");
-                // Remove the looping hum from here as it should be controlled by the drone controller
-                // only play the one-shot uncertainty tone
-                _oneShotSource.PlayOneShot(_uncertaintyClip);
+                _oneShotSource.PlayOneShot(_lowConfidenceClip);
                 break;
             case HMIState.PromptConfirm:
                 _ledAnimator.SetTrigger("PromptConfirm");
@@ -91,9 +88,6 @@ public class DroneHMI : MonoBehaviour
     {
         _loopSource.Stop();
     }
-
-    public void PlayUncertainty()
-        => _oneShotSource.PlayOneShot(_uncertaintyClip);
 
     public void PlayGestureAccept()
         => _oneShotSource.PlayOneShot(_gestureAcceptClip);

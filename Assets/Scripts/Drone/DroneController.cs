@@ -12,6 +12,20 @@ public class DroneController : MonoBehaviour
 
     [Header("Legs")]
     [SerializeField] private Transform[] _legs;                 // landing gear transforms
+    
+    [System.Serializable]
+    public enum LegRotationType
+    {
+        RotateOnX,
+        RotateOnY, 
+        RotateOnZ,
+        RotateOnNegativeX,
+        RotateOnNegativeY,
+        RotateOnNegativeZ
+    }
+    
+    [Tooltip("Set the rotation type for each leg in the editor")]
+    [SerializeField] private LegRotationType[] _legRotationTypes;
 
     [Header("Sway Controller")]
     [SerializeField] private PIDController _pidController;      // subtle hover sway
@@ -95,6 +109,9 @@ public class DroneController : MonoBehaviour
 
     private void Start()
     {
+        // Initialize leg rotation data if not set
+        InitializeLegRotationTypes();
+        
         // begin in hover on game start
         TransitionToState(FlightState.Hover);
     }
@@ -268,9 +285,8 @@ public class DroneController : MonoBehaviour
 
     private void EnterIdle()
     {
-        // motors off, gear deployed
+        // motors off, but don't automatically change gear position
         _rotorsSpinning = false;
-        StartGearAnimation(0f);
         _pidController.enabled = false;
     }
 
@@ -279,9 +295,8 @@ public class DroneController : MonoBehaviour
         // begin smooth ascend/descend to hover height
         _isAscendingHover = true;
 
-        // start motors, retract gear, start sway
+        // start motors and sway, but don't automatically retract gear
         _rotorsSpinning = true;
-        StartGearAnimation(_legRetractedAngle);
         _pidController.enabled = true;
     }
 
@@ -293,9 +308,8 @@ public class DroneController : MonoBehaviour
 
     private void EnterCruise()
     {
-        // Start rotors, retract gear, enable sway
+        // Start rotors and enable sway, but don't automatically retract gear
         _rotorsSpinning = true;
-        StartGearAnimation(_legRetractedAngle);
         _pidController.enabled = true;
         
         // Set destination for arrival detection only (movement handled by PerformCruise)
@@ -321,7 +335,7 @@ public class DroneController : MonoBehaviour
 
     private void EnterLanding()
     {
-        // Keep rotors spinning during landing
+        // Keep rotors spinning during landing, but don't automatically extend gear
         _rotorsSpinning = true;
         _pidController.enabled = true;
         
@@ -356,7 +370,7 @@ public class DroneController : MonoBehaviour
 
     private void EnterLandAbort()
     {
-        // Keep rotors spinning during abort
+        // Keep rotors spinning during abort, but don't automatically retract gear
         _rotorsSpinning = true;
         _pidController.enabled = true;
         
@@ -395,7 +409,7 @@ public class DroneController : MonoBehaviour
 
     private void EnterAbort()
     {
-        // Keep rotors spinning during abort
+        // Keep rotors spinning during abort, but don't automatically retract gear
         _rotorsSpinning = true;
         _pidController.enabled = true;
         
@@ -448,15 +462,73 @@ public class DroneController : MonoBehaviour
     private void AnimateLegs()
     {
         bool done = true;
-        foreach (var leg in _legs)
+        
+        for (int i = 0; i < _legs.Length; i++)
         {
-            var e = leg.localEulerAngles;
-            float curr = e.x > 180f ? e.x - 360f : e.x;
-            float nxt = Mathf.MoveTowards(curr, _gearTargetAngle, _legRotateSpeed * Time.deltaTime);
-            leg.localEulerAngles = new Vector3(nxt, e.y, e.z);
-            if (Mathf.Abs(nxt - _gearTargetAngle) > 0.01f)
+            Transform leg = _legs[i];
+            Vector3 euler = leg.localEulerAngles;
+            
+            // Extract current angles, handling wraparound
+            float angleX = euler.x > 180f ? euler.x - 360f : euler.x;
+            float angleY = euler.y > 180f ? euler.y - 360f : euler.y;
+            float angleZ = euler.z > 180f ? euler.z - 360f : euler.z;
+            
+            // Apply rotation based on leg type
+            switch (_legRotationTypes[i])
+            {
+                case LegRotationType.RotateOnX:
+                    angleX = Mathf.MoveTowards(angleX, _gearTargetAngle, _legRotateSpeed * Time.deltaTime);
+                    break;
+                case LegRotationType.RotateOnY:
+                    angleY = Mathf.MoveTowards(angleY, _gearTargetAngle, _legRotateSpeed * Time.deltaTime);
+                    break;
+                case LegRotationType.RotateOnZ:
+                    angleZ = Mathf.MoveTowards(angleZ, _gearTargetAngle, _legRotateSpeed * Time.deltaTime);
+                    break;
+                case LegRotationType.RotateOnNegativeX:
+                    angleX = Mathf.MoveTowards(angleX, -_gearTargetAngle, _legRotateSpeed * Time.deltaTime);
+                    break;
+                case LegRotationType.RotateOnNegativeY:
+                    angleY = Mathf.MoveTowards(angleY, -_gearTargetAngle, _legRotateSpeed * Time.deltaTime);
+                    break;
+                case LegRotationType.RotateOnNegativeZ:
+                    angleZ = Mathf.MoveTowards(angleZ, -_gearTargetAngle, _legRotateSpeed * Time.deltaTime);
+                    break;
+            }
+            
+            // Apply the new rotation
+            leg.localEulerAngles = new Vector3(angleX, angleY, angleZ);
+            
+            // Check if this leg is at target position
+            bool legAtTarget = false;
+            switch (_legRotationTypes[i])
+            {
+                case LegRotationType.RotateOnX:
+                    legAtTarget = Mathf.Abs(angleX - _gearTargetAngle) < 0.1f;
+                    break;
+                case LegRotationType.RotateOnY:
+                    legAtTarget = Mathf.Abs(angleY - _gearTargetAngle) < 0.1f;
+                    break;
+                case LegRotationType.RotateOnZ:
+                    legAtTarget = Mathf.Abs(angleZ - _gearTargetAngle) < 0.1f;
+                    break;
+                case LegRotationType.RotateOnNegativeX:
+                    legAtTarget = Mathf.Abs(angleX - (-_gearTargetAngle)) < 0.1f;
+                    break;
+                case LegRotationType.RotateOnNegativeY:
+                    legAtTarget = Mathf.Abs(angleY - (-_gearTargetAngle)) < 0.1f;
+                    break;
+                case LegRotationType.RotateOnNegativeZ:
+                    legAtTarget = Mathf.Abs(angleZ - (-_gearTargetAngle)) < 0.1f;
+                    break;
+            }
+            
+            if (!legAtTarget)
+            {
                 done = false;
+            }
         }
+        
         if (done) _gearAnimating = false;
     }
 
@@ -533,5 +605,71 @@ public class DroneController : MonoBehaviour
                     _rotationSpeed * Time.deltaTime);
             }
         }
+    }
+
+    // Initialize leg rotation types if not already set
+    private void InitializeLegRotationTypes()
+    {
+        // Make sure we have the right number of rotation types
+        if (_legRotationTypes == null || _legRotationTypes.Length != _legs.Length)
+        {
+            _legRotationTypes = new LegRotationType[_legs.Length];
+            // Default to X rotation
+            for (int i = 0; i < _legs.Length; i++)
+            {
+                _legRotationTypes[i] = LegRotationType.RotateOnX;
+            }
+        }
+    }
+
+    // Reset all legs to their default position (for testing/debugging)
+    public void ResetLegs()
+    {
+        foreach (var leg in _legs)
+        {
+            leg.localEulerAngles = Vector3.zero;
+        }
+    }
+
+    // Add public methods to control leg retraction/extension independently
+    
+    /// <summary>
+    /// Retracts the drone legs (for flight mode)
+    /// </summary>
+    public void RetractLegs()
+    {
+        StartGearAnimation(_legRetractedAngle);
+    }
+    
+    /// <summary>
+    /// Extends the drone legs (for landing mode)
+    /// </summary>
+    public void ExtendLegs()
+    {
+        StartGearAnimation(0f);
+    }
+    
+    /// <summary>
+    /// Returns whether the legs are currently moving (animating)
+    /// </summary>
+    public bool AreLegsAnimating()
+    {
+        return _gearAnimating;
+    }
+    
+    /// <summary>
+    /// Returns whether the legs are currently retracted
+    /// </summary>
+    public bool AreLegsRetracted()
+    {
+        return !_gearAnimating && Mathf.Approximately(_gearTargetAngle, _legRetractedAngle);
+    }
+    
+    /// <summary>
+    /// Returns whether the legs are currently extended
+    /// </summary>
+    public bool AreLegsExtended()
+    {
+        return !_gearAnimating && Mathf.Approximately(_gearTargetAngle, 0f);
     }
 }
