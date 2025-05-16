@@ -2277,8 +2277,8 @@ MonoBehaviour:
   _abortClimbHeight: 8
   _c0Timeout: 5
   _rotorSpeed: 4000
-  _legRetractedAngle: 30
-  _legRotateSpeed: 90
+  _legRetractedAngle: 0
+  _legRotateSpeed: 0
   _landingDescentSpeed: 2
 --- !u!114 &7979496425104685686
 MonoBehaviour:
