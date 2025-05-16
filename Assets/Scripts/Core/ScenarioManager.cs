@@ -31,6 +31,62 @@ public class ScenarioManager : MonoBehaviour
 
     private bool _scenarioRunning = false;
 
+    private void Awake()
+    {
+        // Subscribe to drone state changes to update HMI accordingly
+        if (_drone != null)
+        {
+            _drone.OnStateChanged += HandleDroneStateChanged;
+        }
+    }
+
+    private void OnDestroy()
+    {
+        // Unsubscribe to prevent memory leaks
+        if (_drone != null)
+        {
+            _drone.OnStateChanged -= HandleDroneStateChanged;
+        }
+    }
+
+    private void HandleDroneStateChanged(DroneController.FlightState newState)
+    {
+        // Update HMI based on drone flight state
+        switch (newState)
+        {
+            case DroneController.FlightState.Idle:
+                _hmi.StopHoverHum();
+                
+                // Hide any AR interaction elements when drone goes to idle
+                if (_interactionManager != null)
+                {
+                    _interactionManager.HideAllInteractions();
+                }
+                break;
+                
+            case DroneController.FlightState.Hover:
+                _hmi.PlayHoverHum();
+                break;
+                
+            case DroneController.FlightState.CruiseToTarget:
+                _hmi.PlayHoverHum();
+                break;
+                
+            case DroneController.FlightState.Landing:
+                // Stop hover hum during landing to let scenario control sounds
+                _hmi.StopHoverHum();
+                break;
+                
+            case DroneController.FlightState.LandAbort:
+                // Let scenario control sounds during landing abort
+                break;
+                
+            case DroneController.FlightState.Abort:
+                // Let scenario control sounds during abort
+                break;
+        }
+    }
+
     private void Start()
     {
         StartScenario();
@@ -153,50 +209,74 @@ public class ScenarioManager : MonoBehaviour
 
     private IEnumerator RunC0Scenario()
     {
-        // 1. Initial hover (drone spawns and ascends to hover height automatically)
+        Debug.Log("Starting C-0 Scenario (Autonomous/Abort)");
+
+        // 1. Gentle descent to hover height
+        // The drone already transitions to hover state in ResetDroneState()
+        // Just wait for it to reach hover height
+        yield return new WaitForSeconds(_initialHoverTime);
+        
+        // 2. Hover and play confirmation sound
+        _hmi.SetStatus(DroneHMI.HMIState.PromptConfirm);
+        
+        // Wait in hover while facing participant
         yield return new WaitForSeconds(_initialHoverTime);
 
-        // 2. Cruise to first navigation point
-        Vector3 navPoint = _interactionManager.RandomizeC0Position();
-        _drone.StartCruiseTo(navPoint);
-        yield return new WaitForSeconds(_cruiseTime);
-
-        // 3. Hover and wait
-        yield return new WaitForSeconds(_initialHoverTime);
-
-        // 4. Perform two land-abort loops
+        // 3. Perform two land-abort loops
         for (int i = 0; i < 2; i++)
         {
-            // a) Begin a short landing
+            // 3.1 Randomize cruise location
+            Vector3 navPoint = _interactionManager.RandomizeC0Position();
+            
+            // 3.2 Move to the location while looking at participant
+            _drone.StartCruiseTo(navPoint);
+            yield return new WaitForSeconds(_cruiseTime);
+            
+            // 3.2.1 Wait at new location
+            yield return new WaitForSeconds(_initialHoverTime);
+            
+            // 3.3 Attempt to land but stop at the lowest point
             Vector3 landingSpot = _interactionManager.GetC0TargetPosition();
             landingSpot.y -= _landingDepth;
             _drone.BeginLanding(landingSpot);
-
-            // b) Play a landing loop (beep) via rotor hum audio
+            
+            // Play hover hum during landing attempt
             _hmi.PlayHoverHum();
             yield return new WaitForSeconds(_landingWaitTime);
-
-            // c) Signal uncertainty (flash LED + tone)
+            
+            // 3.4 Communicate uncertainty (play sound and flash lights)
             _hmi.SetStatus(DroneHMI.HMIState.Uncertain);
+            
+            // Maintain hover hum during uncertainty
+            _hmi.PlayHoverHum();
             yield return new WaitForSeconds(_landingWaitTime);
-
-            // d) Abort landing (palm-up) to re-hover
+            
+            // 3.5 Raise back up to hover height
             _drone.LandAbort();
             yield return new WaitForSeconds(_postAbortHoverTime);
-
-            // e) On first loop, reposition and cruise again
-            if (i == 0)
-            {
-                Vector3 newNavPoint = _interactionManager.RandomizeC0Position();
-                _drone.StartCruiseTo(newNavPoint);
-                yield return new WaitForSeconds(_cruiseTime);
-                yield return new WaitForSeconds(_initialHoverTime);
-            }
+            
+            // Reset HMI state after uncertainty
+            _hmi.SetStatus(DroneHMI.HMIState.Idle);
+            
+            // Ensure hover hum continues
+            _hmi.PlayHoverHum();
         }
 
-        // 5. After two attempts, perform full abort
+        // 4. After two attempts, perform full abort sequence
+        
+        // 4.1 Communicate abort mission
         _hmi.SetStatus(DroneHMI.HMIState.Abort);
+        
+        // 4.2 Wait to let the abort message be communicated
+        yield return new WaitForSeconds(_landingWaitTime);
+        
+        // 4.3 Abort mission (rise up while keeping rotors on)
         _drone.Abort();
+        
+        // Keep hover hum during abort flight
+        _hmi.PlayHoverHum();
+        
+        Debug.Log("Completed C-0 Scenario");
     }
     
     private IEnumerator RunC1Scenario()

@@ -53,11 +53,8 @@ public class DroneHMI : MonoBehaviour
                 break;
             case HMIState.Uncertain:
                 _ledAnimator.SetTrigger("Uncertain");
-                // looped hover hum
-                _loopSource.clip = _landingBeepClip;
-                _loopSource.loop = true;
-                _loopSource.Play();
-                // one-shot uncertainty tone
+                // Remove the looping hum from here as it should be controlled by the drone controller
+                // only play the one-shot uncertainty tone
                 _oneShotSource.PlayOneShot(_uncertaintyClip);
                 break;
             case HMIState.PromptConfirm:
