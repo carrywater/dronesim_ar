@@ -1,17 +1,101 @@
 using UnityEngine;
+using System;
 using System.Collections;
+#if UNITY_ANDROID && !UNITY_EDITOR
+using Unity.XR.Oculus;
+#endif
+using System.Linq;
 
+// Conditionally include Oculus namespaces if available
+#if USING_XR_SDK_OCULUS || USING_OCULUS_SDK
+using OculusSampleFramework;
+#endif
+
+/// <summary>
+/// Core flight FSM (take-off, cruise, hover, landing, abort)
+/// Handles rotor & gear animation, and PID sway
+/// </summary>
 public class DroneController : MonoBehaviour
 {
-    // Serialized references to other layers
-    [Header("References")]
-    [SerializeField] private DroneArrivalDetector _navigation;       // for arrival callbacks
+    [Header("Essential References")]
+    [SerializeField] private DroneArrivalDetector _navigation;   // For arrival callbacks
+    [SerializeField] private Transform _droneOffset;             // Visual model and components
+    [Tooltip("Transform to track - should be the OVR HMD (head) transform")]
+    [SerializeField] private Transform _hmdTransform;
+    [SerializeField] private PIDController _pidController;       // Subtle random hover sway (different from directional tilting)
+    [SerializeField] private DroneHMI _hmi;                      // For controlling sound effects directly
 
-    [Header("Propellers")]
-    [SerializeField] private Transform[] _propellers;           // assign 8 propeller transforms
+    [Header("Drone Components")]
+    [SerializeField] private Transform[] _propellers;
+    [SerializeField] private LegConfig[] _legConfigs;
+    
+    [Header("Behavior Settings")]
+    [Tooltip("Enable scanning behavior in hover state")]
+    [SerializeField] private bool _enableScanning = true;
+    [Tooltip("Enable subtle micro-movements during hover")]
+    [SerializeField] private bool _enableMicroMovements = true;
+    
+    [Header("HMD Tracking")]
+    [SerializeField] private float _hmdTrackingSpeed = 2f;
+    [SerializeField] private float _hmdTrackingDelay = 0.5f;
+    [SerializeField] private float _maxHmdRotationAngle = 45f;
 
-    [Header("Legs")]
-    [SerializeField] private Transform[] _legs;                 // landing gear transforms
+    #region Advanced Settings (Hidden by Default)
+    // Movement Profiles - hidden from Inspector
+    private AnimationCurve _cruiseMovementCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+    private AnimationCurve _landingCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+    private AnimationCurve _abortCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+    
+    // Rotation Settings - hidden from Inspector
+    private float _rotationSpeed = 2f;
+    private float _rotationStartDelay = 0.2f;
+
+    // Tilt and Animation Settings - hidden from Inspector
+    private float _scanAngleRange = 15f;
+    private float _scanCycleTime = 4f;
+    private float _baseTiltAngle = 2.5f;
+    private float _speedTiltAngle = 1.5f;
+    private float _tiltVariability = 0.15f;
+    private float _tiltRecoverySpeed = 30f;
+    private float _microMovementStrength = 0.12f;
+    private float _pitchOscillationStrength = 0.08f;
+    private float _rollOscillationStrength = 0.06f;
+    private float _oscillationSpeed = 1f;
+    private float _windInfluence = 0.05f;
+
+    // Drone Physical Settings - hidden from Inspector
+    private float _rotorSpeed = 36000f;  // 6000 RPM (6000 * 360 degrees per minute = 2,160,000 degrees per minute = 36,000 degrees per second)
+    private float _legRetractedAngle = 30f;
+    private float _legRotateSpeed = 90f;
+    
+    // Leg animation types - kept for reference
+    private LegRotationType[] _legRotationTypes;
+    #endregion
+    
+    #region Flight State Management
+    
+    // Public flight state enum as described in README
+    public enum FlightState 
+    { 
+        Idle,           // Motors off
+        Hover,          // Hold at hover height with sway
+        CruiseToTarget, // NavMesh path to target 
+        Landing,        // Descent to landing spot
+        LandAbort,      // Climb back to hover
+        Abort           // Ascend and despawn
+    }
+    
+    // State change event
+    public delegate void StateChangedHandler(FlightState newState);
+    public event StateChangedHandler OnStateChanged;
+    
+    // Current flight state
+    private FlightState _state = FlightState.Idle;
+    public FlightState CurrentState => _state;
+    
+    #endregion
+    
+    #region Leg Animation Types
     
     [System.Serializable]
     public enum LegRotationType
@@ -24,146 +108,694 @@ public class DroneController : MonoBehaviour
         RotateOnNegativeZ
     }
     
-    [Tooltip("Set the rotation type for each leg in the editor")]
-    [SerializeField] private LegRotationType[] _legRotationTypes;
-
-    [Header("Sway Controller")]
-    [SerializeField] private PIDController _pidController;      // subtle hover sway
-
-    [Header("Movement Profiles")]
-    [Tooltip("How the drone accelerates/decelerates during cruise")]
-    [SerializeField] private AnimationCurve _cruiseMovementCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
-    [Tooltip("How the drone moves during landing")]
-    [SerializeField] private AnimationCurve _landingCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
-    [Tooltip("How the drone moves during abort")]
-    [SerializeField] private AnimationCurve _abortCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+    #endregion
     
-    [Header("Rotation Settings")]
-    [Tooltip("Whether the drone should rotate to face movement direction")]
-    [SerializeField] private bool _faceMovementDirection = true;
-    [Tooltip("Whether the drone should face the participant when hovering")]
-    [SerializeField] private bool _faceParticipant = true;
-    [Tooltip("Speed at which the drone rotates to face a new direction")]
-    [SerializeField] private float _rotationSpeed = 2f;
-    [Tooltip("Transform representing the participant's position (typically camera/head)")]
-    [SerializeField] private Transform _participantTransform;
-
-    [Header("Scenario Targets")]
-    [SerializeField] private Transform _c1Target;  // C-1 landing probe target (zone child)
-    [SerializeField] private Transform _c2Target;  // C-2 guidance pad target (zone child)
-    [SerializeField] private Transform _c3Target;  // C-3 zone random target
-
-    [Header("Flight Settings")]
-    [SerializeField] private float _hoverHeight = 6f;
-    [SerializeField] private float _hoverMovementSpeed = 2f;  // speed factor for smooth ascend/descend to hover
-    [SerializeField] private float _cruiseSpeed = 3f;
-    [SerializeField] private float _abortClimbHeight = 8f;
-    [SerializeField] private float _c0Timeout = 5f;
-    [SerializeField] private float _rotorSpeed = 360f;            // rotor spin speed (deg/sec)
-    [SerializeField] private float _legRetractedAngle = 30f;      // gear fold angle (deg)
-    [SerializeField] private float _legRotateSpeed = 90f;         // gear rotation speed (deg/sec)
-    [SerializeField] private float _landingDescentSpeed = 2f;     // landing / climb speed
-
-    // Make FlightState public so it can be used in events and properties
-    public enum FlightState { Idle, Hover, CruiseToTarget, Landing, LandAbort, Abort }
-    private FlightState _state;
-
-    // State changed event that ScenarioManager can listen to
-    public delegate void StateChangedHandler(FlightState newState);
-    public event StateChangedHandler OnStateChanged;
-
-    // target for Cruise & landing
-    private Vector3 _cruiseTargetPosition;
-    private Transform _cruiseTargetTransform;
-    private Vector3 _landingSpot;
-    private bool _isAscendingHover;  // tracks smooth ascend/descend to hover height
-
-    // Movement transition variables
-    private Vector3 _moveStartPosition;
-    private float _movementProgress = 0f;
-    private float _movementDuration = 0f;
-    private bool _isInTransition = false;
-
-    // Internal state
-    private Coroutine _c0Coroutine;
-    private bool _rotorsSpinning;
-    private bool _gearAnimating;
-    private float _gearTargetAngle;
+    #region Movement Parameters
     
-    // Cached transform for optimization
-    private Transform _transform;
+    // Movement settings - these will be set by the ScenarioManager
+    private float _hoverHeight = 6f;            // Default hover height (can be overridden)
+    private float _hoverMovementSpeed = 2f;     // Speed for vertical adjustment
+    private float _cruiseSpeed = 3f;            // Horizontal movement speed
+    private float _abortClimbHeight = 8f;       // How high to climb during abort
+    private float _landingDescentSpeed = 2f;    // Speed of landing descent
 
-    public FlightState CurrentState => _state;
+    // Unified position control system
+    private Vector3 _targetPosition;            // Target position for all movements (single source of truth)
+    private Vector3 _currentVelocity = Vector3.zero; // For SmoothDamp
+    private bool _positionLocked = false;       // Locks position during critical transitions
+    private float _positionSmoothTime = 1.0f;   // Increased from 0.5f for smoother movement
+    
+    // Target positions
+    private Vector3 _cruiseTargetPosition;      // World-space target for cruise
+    private Transform _cruiseTargetTransform;   // Optional transform to follow
+    private Vector3 _landingSpot;               // World-space landing location
+    
+    #endregion
+    
+    #region Internal State
+    
+    private bool _isInitialized = false;        // Whether initialization is complete
+    private bool _rotorsSpinning = false;       // Whether propellers are spinning
+    private bool _gearAnimating = false;        // Whether legs are currently moving
+    private float _gearTargetAngle = 0f;        // Target angle for leg animation
+    private Transform _transform;               // Cached transform for optimization
+    
+    // Movement state tracking
+    private bool _isAscendingHover = false;     // Whether currently moving to hover height
+    private bool _isInTransition = false;       // Whether currently in a movement transition
+    private float _movementProgress = 0f;       // Progress along movement curve (legacy)
+    
+    // Flag to track if we're calling from ReturnToHover to avoid duplicating position preservation
+    private bool _calledFromReturnToHover = false;
+    
+    private Vector3 _targetHmdDirection;
+    private float _hmdTrackingTimer;
+    
+    #endregion
+    
+    #region Initialization & Setup
 
     private void Awake()
     {
-        _state = FlightState.Idle;
+        // Cache transform for performance
         _transform = transform;
         
-        // Auto-find participant transform if not set (usually the main camera)
-        if (_participantTransform == null)
+        // Initialize leg configurations
+        InitializeLegConfigs();
+        
+        // Auto-find drone offset if not set
+        if (_droneOffset == null && transform.childCount > 0)
         {
-            _participantTransform = Camera.main?.transform;
+            _droneOffset = transform.GetChild(0);
+            Debug.Log($"Auto-assigned drone offset to first child: {_droneOffset.name}");
+        }
+        
+        if (_droneOffset == null)
+        {
+            Debug.LogError("No drone offset assigned or found! Drone visuals won't move correctly.");
+        }
+        
+        // Reset offset position to avoid initial jump
+        if (_droneOffset != null)
+        {
+            _droneOffset.localPosition = Vector3.zero;
+        }
+        
+        // Log if multiple drones detected (debugging)
+        if (FindObjectsByType<DroneController>(FindObjectsSortMode.None).Length > 1)
+        {
+            Debug.LogWarning($"Multiple drone controllers detected: {FindObjectsByType<DroneController>(FindObjectsSortMode.None).Length}");
         }
     }
-
-    private void Start()
+    
+    /// <summary>
+    /// Initialize the drone with flight settings
+    /// This must be called before using the drone
+    /// </summary>
+    public void Initialize(float hoverHeight, float hoverMovementSpeed, float cruiseSpeed, 
+                          float abortClimbHeight, float landingDescentSpeed)
     {
-        // Initialize leg rotation data if not set
-        InitializeLegRotationTypes();
+        _hoverHeight = hoverHeight;
+        _hoverMovementSpeed = hoverMovementSpeed;
+        _cruiseSpeed = cruiseSpeed;
+        _abortClimbHeight = abortClimbHeight;
+        _landingDescentSpeed = landingDescentSpeed;
         
-        // begin in hover on game start
+        // Auto-find HMI component if not assigned
+        if (_hmi == null)
+        {
+            _hmi = GetComponent<DroneHMI>();
+            if (_hmi == null)
+            {
+                _hmi = GetComponentInChildren<DroneHMI>();
+            }
+            
+            if (_hmi != null)
+            {
+                Debug.Log("Auto-assigned DroneHMI: " + _hmi.name);
+            }
+        }
+        
+        _isInitialized = true;
+        Debug.Log("DroneController initialized with flight settings");
+    }
+    
+    /// <summary>
+    /// Start the drone in hover state after initialization
+    /// </summary>
+    public void StartInHoverState()
+    {
+        if (!_isInitialized)
+        {
+            Debug.LogError("Cannot start drone hover - drone not initialized! Call Initialize first.");
+            return;
+        }
+        
+        // Initialize target position at hover height
+        Vector3 currentPos = _droneOffset.localPosition;
+        _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
+        
+        // Use a smoother transition for initial hover
+        _positionSmoothTime = 0.5f;
+        
+        // Transition to hover state
         TransitionToState(FlightState.Hover);
     }
+    
+    #endregion
+    
+    #region Update Loop & State Management
 
     private void Update()
     {
-        // smooth ascend/descend into hover state
-        if (_state == FlightState.Hover && _isAscendingHover)
-        {
-            Vector3 pos = _transform.position;
-            Vector3 target = new Vector3(pos.x, _hoverHeight, pos.z);
-            _transform.position = Vector3.Lerp(pos, target, Time.deltaTime * _hoverMovementSpeed);
-            if (Mathf.Abs(_transform.position.y - _hoverHeight) < 0.01f)
-            {
-                _isAscendingHover = false;
-                _c0Coroutine = StartCoroutine(C0AbortTimer());
-            }
-        }
+        // Skip update if not initialized
+        if (!_isInitialized) return;
 
-        // sync a moving target
-        if (_cruiseTargetTransform != null)
-            _cruiseTargetPosition = _cruiseTargetTransform.position;
-
-        // animate rotors
+        // Animate propellers if spinning
         if (_rotorsSpinning) SpinRotors();
-        // animate gear
+        
+        // Animate legs if in transition
         if (_gearAnimating) AnimateLegs();
+
+        // Update position using unified control system
+        UpdateUnifiedPosition();
         
         // Handle rotation to face direction or participant
         UpdateRotation();
-
-        // state-specific updates
+        
+        UpdateHMDTracking();
+        
+        // State-specific updates
         switch (_state)
         {
+            case FlightState.Hover:
+                UpdateHoverState();
+                break;
+                
             case FlightState.CruiseToTarget:
-                // Handle direct cruise movement now that we're not using NavMesh
-                PerformCruise();
+                UpdateCruiseState();
                 break;
+                
             case FlightState.Landing:
-                PerformLanding();
+                UpdateLandingState();
                 break;
+                
             case FlightState.LandAbort:
-                PerformLandAbort();
+                UpdateLandAbortState();
                 break;
+                
             case FlightState.Abort:
-                PerformAbort();
+                UpdateAbortState();
                 break;
         }
     }
 
     /// <summary>
-    /// Set the cruise target position at runtime (e.g., pass spawn location).
+    /// Unified position control system that handles all drone movement smoothly
+    /// </summary>
+    private void UpdateUnifiedPosition()
+    {
+        // Skip if position is locked during critical transitions
+        if (_positionLocked) return;
+        
+        // Safety check for extreme velocity values
+        if (_currentVelocity.magnitude > 20f)
+        {
+            Debug.LogWarning($"Extreme velocity detected: {_currentVelocity.magnitude}! Clamping velocity.");
+            _currentVelocity = Vector3.ClampMagnitude(_currentVelocity, 20f);
+        }
+        
+        // Use SmoothDamp for all position changes - smoother than Lerp
+        _droneOffset.localPosition = Vector3.SmoothDamp(
+            _droneOffset.localPosition, 
+            _targetPosition, 
+            ref _currentVelocity, 
+            _positionSmoothTime
+        );
+    }
+
+    /// <summary>
+    /// Updates drone rotation to face movement direction or participant
+    /// </summary>
+    private void UpdateRotation()
+    {
+        // Skip rotation if we don't have necessary references
+        if (_droneOffset == null) return;
+        
+        // Handle rotation based on conditions
+        if (_state == FlightState.CruiseToTarget)
+        {
+            // Face movement direction during cruise
+            FaceMovementDirection();
+        }
+        else
+        {
+            // Face participant
+            Quaternion targetRotation = Quaternion.LookRotation(_targetHmdDirection);
+            
+            // Smooth rotation
+            _droneOffset.rotation = Quaternion.Slerp(
+                _droneOffset.rotation, 
+                targetRotation, 
+                _rotationSpeed * Time.deltaTime);
+        }
+    }
+
+    /// <summary>
+    /// Transition to a new flight state
+    /// </summary>
+    private void TransitionToState(FlightState newState)
+    {
+        // Skip if already in this state
+        if (_state == newState) return;
+        
+        // Lock position during state transition to prevent jumps
+        _positionLocked = true;
+        
+        // Store current position before state change - crucial for smooth transitions
+        Vector3 currentPos = _droneOffset.localPosition;
+        
+        // Set _targetPosition to current position initially
+        // This ensures no immediate position change when unlocking
+        _targetPosition = currentPos;
+        
+        // Exit logic for old state
+        switch (_state)
+        {
+            case FlightState.CruiseToTarget:
+                _navigation.OnArrived -= OnCruiseArrived;
+                break;
+        }
+
+        // Store old and new state
+        FlightState previousState = _state;
+        _state = newState;
+
+        // Auto-disable scanning for precision states
+        switch (newState)
+        {
+            case FlightState.Landing:
+            case FlightState.LandAbort:
+            case FlightState.Abort:
+            case FlightState.Idle:
+                _enableScanning = false;
+                break;
+        }
+        
+        // Notify listeners of state change
+        OnStateChanged?.Invoke(newState);
+        
+        // Entry logic for new state - call the appropriate Enter method first
+        switch (_state)
+        {
+            case FlightState.Idle:
+                EnterIdle();
+                break;
+                
+            case FlightState.Hover:
+                EnterHover();
+                break;
+                
+            case FlightState.CruiseToTarget:
+                EnterCruise();
+                break;
+                
+            case FlightState.Landing:
+                EnterLanding();
+                break;
+                
+            case FlightState.LandAbort:
+                EnterLandAbort();
+                break;
+                
+            case FlightState.Abort:
+                EnterAbort();
+                break;
+        }
+        
+        // Reset flag after state change
+        _calledFromReturnToHover = false;
+        
+        // Unlock position to allow smooth movement to new target
+        _positionLocked = false;
+    }
+    
+    #endregion
+    
+    #region State Entry Methods
+
+    private void EnterIdle()
+    {
+        // Motors off
+        _rotorsSpinning = false;
+        _pidController.enabled = false;
+        
+        // Stop propeller sounds if HMI is available
+        if (_hmi != null)
+        {
+        _hmi.StopHoverHum();
+        }
+    }
+
+    private void EnterHover()
+    {
+        Vector3 currentPos = _droneOffset.localPosition;
+        _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
+        Debug.Log($"DRONE_Y_DEBUG: EnterHover | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2} (hoverHeight={_hoverHeight:F2})");
+        // Start motors and PID sway
+        _rotorsSpinning = true;
+        
+        // Temporarily disable PID controller until height is reached
+        StartCoroutine(DelayedPIDEnable());
+        
+        // Start propeller sounds if HMI is available
+        if (_hmi != null)
+        {
+            _hmi.PlayHoverHum();
+        }
+        
+        // Set flag to indicate we're adjusting hover height
+        _isAscendingHover = true;
+    }
+
+    /// <summary>
+    /// Delayed PID controller activation to prevent conflicts during hover transitions
+    /// </summary>
+    private IEnumerator DelayedPIDEnable()
+    {
+        // Disable PID initially to prevent interference
+        if (_pidController != null)
+        {
+            _pidController.enabled = false;
+        }
+        
+        // Wait until we've reached the hover height (with small tolerance)
+        float startTime = Time.time;
+        while (_isAscendingHover)
+        {
+            // Safety timeout (5 seconds max wait)
+            if (Time.time - startTime > 5f)
+            {
+                Debug.LogWarning("DelayedPIDEnable: Timeout waiting for hover height, enabling PID anyway");
+                break;
+            }
+            yield return null;
+        }
+        
+        // Add a small buffer delay for stability
+        yield return new WaitForSeconds(0.2f);
+        
+        // Now enable PID for subtle hover movements
+        if (_pidController != null)
+        {
+            _pidController.enabled = true;
+        }
+    }
+
+    private void EnterCruise()
+    {
+        // Start rotors and enable sway after a delay
+        _rotorsSpinning = true;
+        
+        // Start propeller sounds with slightly higher pitch for cruise
+        if (_hmi != null)
+        {
+            _hmi.PlayHoverHum();
+            _hmi.SetPropellerPitch(1.1f); // Slightly higher pitch for cruising
+        }
+        
+        // Set destination for arrival detection
+        _navigation.SetDestination(_cruiseTargetPosition, _cruiseSpeed);
+        _navigation.OnArrived += OnCruiseArrived;
+        
+        // Convert world target to local offset position
+        Vector3 targetLocalPos = WorldToLocalPoint(_cruiseTargetPosition);
+        
+        // Set the target position (maintaining hover height)
+        _targetPosition = new Vector3(targetLocalPos.x, _hoverHeight, targetLocalPos.z);
+        Debug.Log($"DRONE_Y_DEBUG: EnterCruise | localY={_droneOffset.localPosition.y:F2} -> targetY={_targetPosition.y:F2} (hoverHeight={_hoverHeight:F2})");
+        
+        // Calculate movement duration based on distance and cruise speed
+        float distance = Vector3.Distance(
+            new Vector3(_droneOffset.localPosition.x, _hoverHeight, _droneOffset.localPosition.z),
+            new Vector3(_targetPosition.x, _hoverHeight, _targetPosition.z));
+            
+        // Set smoother transition for longer distances - reduced base smooth time and increased speed factor
+        _positionSmoothTime = Mathf.Max(0.5f, distance / (_cruiseSpeed * 2.5f));  // Reduced from 0.8f and increased speed factor
+    }
+
+    private void EnterLanding()
+    {
+        // Make sure we preserve the current position initially
+        Vector3 currentPos = _droneOffset.localPosition;
+        
+        try
+        {
+            // Convert world landing spot to local position with error handling
+            Vector3 targetLocalPos = WorldToLocalPoint(_landingSpot);
+            
+            // SAFETY CHECK: Validate the conversion result
+            if (float.IsNaN(targetLocalPos.x) || float.IsNaN(targetLocalPos.y) || float.IsNaN(targetLocalPos.z) ||
+                float.IsInfinity(targetLocalPos.x) || float.IsInfinity(targetLocalPos.y) || float.IsInfinity(targetLocalPos.z))
+            {
+                Debug.LogError($"Invalid target position after world-to-local conversion: {targetLocalPos}. Using safe position.");
+                
+                // Use current position but with lower Y value for safe landing
+                targetLocalPos = new Vector3(currentPos.x, 0.1f, currentPos.z);
+            }
+            
+            // Set target position for unified control with safety limits
+            _targetPosition = targetLocalPos;
+            
+            // SAFETY CHECK: Ensure reasonable horizontal distance
+            Vector2 currentHorizontal = new Vector2(currentPos.x, currentPos.z);
+            Vector2 targetHorizontal = new Vector2(_targetPosition.x, _targetPosition.z);
+            float horizontalDistance = Vector2.Distance(currentHorizontal, targetHorizontal);
+            
+            if (horizontalDistance > 50f)
+            {
+                Debug.LogWarning($"Landing spot too far horizontally: {horizontalDistance}m. Limiting distance.");
+                Vector2 direction = (targetHorizontal - currentHorizontal).normalized;
+                targetHorizontal = currentHorizontal + direction * 50f;
+                _targetPosition = new Vector3(targetHorizontal.x, _targetPosition.y, targetHorizontal.y);
+            }
+            
+            // Ensure we don't go below floor level
+            if (_targetPosition.y < 0.1f)
+            {
+                _targetPosition.y = 0.1f;
+            }
+        }
+        catch (System.Exception ex)
+        {
+            // Fallback in case of any conversion error
+            Debug.LogError($"Error setting landing target: {ex.Message}. Using safe position.");
+            _targetPosition = new Vector3(currentPos.x, 0.1f, currentPos.z);
+        }
+        
+        // Set appropriate smooth time for landing speed
+        _positionSmoothTime = 1.0f / _landingDescentSpeed;
+        
+        // Start with rotors spinning
+        _rotorsSpinning = true;
+        
+        // PID controller should be disabled during landing
+        if (_pidController != null)
+        {
+            _pidController.enabled = false;
+        }
+        
+        // Set lower propeller pitch for landing
+        if (_hmi != null)
+        {
+            _hmi.SetPropellerPitch(0.9f); // Lower pitch for descent
+            _hmi.PlayLandingSignal(); // Start landing beep signal
+        }
+        Debug.Log($"DRONE_Y_DEBUG: EnterLanding | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2}");
+    }
+
+    private void EnterLandAbort()
+    {
+        // Calculate target hover position (in local space)
+        Vector3 currentPos = _droneOffset.localPosition;
+        _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
+        Debug.Log($"DRONE_Y_DEBUG: EnterLandAbort | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2} (hoverHeight={_hoverHeight:F2})");
+        
+        // Set appropriate smooth time for abort speed (faster than landing)
+        _positionSmoothTime = 0.7f / _landingDescentSpeed;
+        
+        // Keep rotors spinning during abort
+        _rotorsSpinning = true;
+        
+        // Disable PID during transition
+        if (_pidController != null)
+        {
+            _pidController.enabled = false;
+        }
+        
+        // Higher pitch for abort ascent
+        if (_hmi != null)
+        {
+            _hmi.SetPropellerPitch(1.2f); // Higher pitch for quick ascent
+            _hmi.StopLandingSignal(); // Stop landing beep signal if active
+        }
+    }
+
+    private void EnterAbort()
+    {
+        // Calculate target abort position (high above current position)
+        Vector3 currentPos = _droneOffset.localPosition;
+        _targetPosition = new Vector3(currentPos.x, _abortClimbHeight, currentPos.z);
+        Debug.Log($"DRONE_Y_DEBUG: EnterAbort | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2} (abortClimbHeight={_abortClimbHeight:F2})");
+        
+        // Set appropriate smooth time for abort speed (faster ascent)
+        _positionSmoothTime = 0.5f / _cruiseSpeed;
+        
+        // Keep rotors spinning during abort
+        _rotorsSpinning = true;
+        
+        // Disable PID during abort
+        if (_pidController != null)
+        {
+            _pidController.enabled = false;
+        }
+        
+        // Maximum pitch for emergency abort
+        if (_hmi != null)
+        {
+            _hmi.SetPropellerPitch(1.5f); // Maximum pitch for rapid emergency ascent
+            _hmi.StopLandingSignal(); // Stop landing beep signal if active
+        }
+    }
+    
+    #endregion
+    
+    #region State Update Methods
+    
+    private void UpdateHoverState()
+    {
+        // Only check for hover height completion if we're still ascending
+        if (_isAscendingHover)
+        {
+            // Check if we've reached target height (with a small tolerance)
+            float heightDifference = Mathf.Abs(_droneOffset.localPosition.y - _hoverHeight);
+            
+            if (heightDifference < 0.025f) // Very small tolerance
+            {
+                _isAscendingHover = false;
+            }
+        }
+    }
+    
+    private void UpdateCruiseState()
+    {
+        // Get current position and calculate direction to target
+        Vector3 currentPos = _droneOffset.localPosition;
+        Vector3 directionToTarget = _targetPosition - currentPos;
+        directionToTarget.y = 0; // Ignore vertical difference
+        
+        // Calculate horizontal distance to target
+        float distanceToTarget = directionToTarget.magnitude;
+        
+        // Apply tilt based on movement
+        if (distanceToTarget > 0.05f && _currentVelocity.magnitude > 0.01f)
+        {
+            // Apply tilt based on movement direction and speed
+            Vector3 moveDirection = directionToTarget.normalized;
+            float speedFactor = _currentVelocity.magnitude / _cruiseSpeed;
+            ApplyMovementTilt(moveDirection, Mathf.Clamp01(speedFactor));
+            
+            // Update propeller sound based on speed
+            if (_hmi != null)
+            {
+                // Map speed factor to propeller pitch: faster = higher pitch (1.0-1.3)
+                float pitchValue = Mathf.Lerp(1.0f, 1.3f, Mathf.Clamp01(speedFactor));
+                _hmi.SetPropellerPitch(pitchValue);
+            }
+        }
+        else
+        {
+            // When nearly stationary, recover from tilt
+            RecoverFromTilt();
+            
+            // Return to normal hover pitch
+            if (_hmi != null)
+            {
+                _hmi.SetPropellerPitch(1.0f);
+            }
+        }
+        
+        // Update cruise target if following a transform
+        if (_cruiseTargetTransform != null)
+        {
+            _cruiseTargetPosition = _cruiseTargetTransform.position;
+            
+            // Update target position based on transform
+            Vector3 targetLocalPos = WorldToLocalPoint(_cruiseTargetPosition);
+            _targetPosition = new Vector3(targetLocalPos.x, _hoverHeight, targetLocalPos.z);
+        }
+    }
+
+    private void UpdateLandingState()
+    {
+        float distanceToLanding = Vector3.Distance(_droneOffset.localPosition, _targetPosition);
+        
+        // Update propeller sound and volume based on landing progress
+        if (_hmi != null)
+        {
+            // Calculate how close we are to landing (0 = start, 1 = landed)
+            float landingProgress = 1f - Mathf.Clamp01(distanceToLanding / 2f);
+            
+            // Reduce pitch as we get closer to ground
+            float pitchValue = Mathf.Lerp(0.9f, 0.7f, landingProgress);
+            _hmi.SetPropellerPitch(pitchValue);
+            
+            // Reduce volume in final approach
+            if (landingProgress > 0.8f)
+            {
+                // Begin fading out volume in final 20% of landing
+                float volumeFactor = Mathf.Clamp01((1f - landingProgress) * 5f); // Map 0.8-1.0 to 1.0-0.0
+                _hmi.SetPropellerVolume(volumeFactor);
+            }
+        }
+        
+        // Check if we've reached the landing spot
+        if (distanceToLanding < 0.1f)
+        {
+            // Transition to idle when we've landed
+            TransitionToState(FlightState.Idle);
+        }
+    }
+
+    private void UpdateLandAbortState()
+    {
+        // Calculate distance to hover height
+        float distanceToHover = Mathf.Abs(_droneOffset.localPosition.y - _hoverHeight);
+        
+        // Update propeller sound based on abort progress
+        if (_hmi != null)
+        {
+            // Calculate abort progress (0 = start, 1 = reached hover)
+            float abortProgress = 1f - Mathf.Clamp01(distanceToHover / 2f);
+            
+            // Start at high pitch (emergency) and gradually return to normal
+            float pitchValue = Mathf.Lerp(1.4f, 1.1f, abortProgress);
+            _hmi.SetPropellerPitch(pitchValue);
+            
+            // Boost volume during abort
+            _hmi.SetPropellerVolume(1.2f);
+        }
+        
+        // Check if we've reached hover height
+        if (distanceToHover < 0.1f)
+        {
+            // Transition back to hover state
+            TransitionToState(FlightState.Hover);
+            
+            // Reset to normal volume
+            if (_hmi != null)
+            {
+                _hmi.SetPropellerVolume(1.0f);
+            }
+        }
+    }
+
+    private void UpdateAbortState()
+    {
+        // Check if we've reached abort height
+        if (_droneOffset.localPosition.y >= _abortClimbHeight - 0.1f)
+        {
+            // Destroy the GameObject when we reach abort height
+            Destroy(gameObject);
+        }
+    }
+    
+    #endregion
+    
+    #region Public API Methods
+    
+    /// <summary>
+    /// Set the cruise target position at runtime
     /// </summary>
     public void SetCruiseTarget(Vector3 position)
     {
@@ -172,467 +804,166 @@ public class DroneController : MonoBehaviour
     }
 
     /// <summary>
-    /// Set the cruise target by Transform, syncing its position each frame.
+    /// Set the cruise target by Transform, syncing its position each frame
     /// </summary>
     public void SetCruiseTarget(Transform targetTransform)
     {
         _cruiseTargetTransform = targetTransform;
+        if (targetTransform != null)
+        {
         _cruiseTargetPosition = targetTransform.position;
+        }
     }
 
     /// <summary>
-    /// Begin cruising to any arbitrary world position.
+    /// Start cruising to any arbitrary world position
     /// </summary>
     public void StartCruiseTo(Vector3 position)
     {
+        if (!_isInitialized)
+        {
+            Debug.LogError("Cannot start cruise - drone not initialized!");
+            return;
+        }
+        
         SetCruiseTarget(position);
         TransitionToState(FlightState.CruiseToTarget);
     }
 
     /// <summary>
-    /// Begin cruising to the C-1 scenario target.
+    /// Begin landing at the given spot
     /// </summary>
-    public void StartCruiseToC1()
-    {
-        SetCruiseTarget(_c1Target);
-        TransitionToState(FlightState.CruiseToTarget);
-    }
-
-    /// <summary>
-    /// Begin cruising to the C-2 scenario target.
-    /// </summary>
-    public void StartCruiseToC2()
-    {
-        SetCruiseTarget(_c2Target);
-        TransitionToState(FlightState.CruiseToTarget);
-    }
-
-    /// <summary>
-    /// Begin cruising to the C-3 scenario target.
-    /// </summary>
-    public void StartCruiseToC3()
-    {
-        SetCruiseTarget(_c3Target);
-        TransitionToState(FlightState.CruiseToTarget);
-    }
-
-    /// <summary>Invoked by scenario logic to begin a landing at the given spot.</summary>
     public void BeginLanding(Vector3 spot)
     {
+        if (!_isInitialized)
+        {
+            Debug.LogError("Cannot begin landing - drone not initialized!");
+            return;
+        }
+        
+        // CRITICAL: Validate landing spot for safety
+        Vector3 originalSpot = spot;
+        Vector3 currentWorldPos = transform.position;
+        
+        // Check for NaN or Infinity values that would cause erratic movement
+        if (float.IsNaN(spot.x) || float.IsNaN(spot.y) || float.IsNaN(spot.z) || 
+            float.IsInfinity(spot.x) || float.IsInfinity(spot.y) || float.IsInfinity(spot.z))
+        {
+            Debug.LogError($"Invalid landing spot detected: {spot}. Using current position instead.");
+            spot = currentWorldPos;
+            spot.y = 0.1f; // Just above ground level
+        }
+        
+        // Check for extreme values that would cause the drone to fly off
+        float maxAllowedDistance = 50f; // Maximum allowed horizontal distance
+        Vector2 currentHorizontal = new Vector2(currentWorldPos.x, currentWorldPos.z);
+        Vector2 targetHorizontal = new Vector2(spot.x, spot.z);
+        
+        if (Vector2.Distance(targetHorizontal, currentHorizontal) > maxAllowedDistance)
+        {
+            Debug.LogWarning($"Landing spot too far: {spot}, distance: {Vector2.Distance(targetHorizontal, currentHorizontal)}. Limiting distance.");
+            Vector2 direction = (targetHorizontal - currentHorizontal).normalized;
+            targetHorizontal = currentHorizontal + direction * maxAllowedDistance;
+            spot = new Vector3(targetHorizontal.x, spot.y, targetHorizontal.y);
+        }
+        
+        // Ensure landing spot has reasonable Y value
+        if (spot.y < 0.1f)
+        {
+            Debug.LogWarning($"Landing spot Y value is too low ({spot.y}), adjusting to prevent floor penetration");
+            spot.y = 0.1f;
+        }
+        else if (spot.y > 1.0f)
+        {
+            Debug.LogWarning($"Landing spot Y value is too high ({spot.y}), adjusting to reasonable height");
+            spot.y = 1.0f;
+        }
+        
+        // Store the landing spot for use in the landing state
         _landingSpot = spot;
+        
+        // If the landing spot was modified, log it
+        if (spot != originalSpot)
+        {
+            Debug.LogWarning($"Landing spot adjusted from {originalSpot} to {_landingSpot}");
+        }
+        
+        // Use a slightly longer smooth time for landing to prevent sudden movements
+        _positionSmoothTime = 1.2f / _landingDescentSpeed;
+        
+        // Transition to landing state
         TransitionToState(FlightState.Landing);
     }
 
-    /// <summary>Invoked on palm-up gesture to abort landing.</summary>
+    /// <summary>
+    /// Abort landing and return to hover (palm-up gesture)
+    /// </summary>
     public void LandAbort()
     {
+        if (!_isInitialized)
+        {
+            Debug.LogError("Cannot abort landing - drone not initialized!");
+            return;
+        }
+        
+        // Store original rotation before state change
+        Quaternion originalRotation = _droneOffset.rotation;
+        
         TransitionToState(FlightState.LandAbort);
+        
+        // Restore original rotation to maintain facing direction
+        _droneOffset.rotation = originalRotation;
     }
 
-    /// <summary>Invoked by C-0 timer or low-confidence rule to abort mission.</summary>
+    /// <summary>
+    /// Abort mission and depart (C0 timeout or low confidence)
+    /// </summary>
     public void Abort()
     {
+        if (!_isInitialized)
+        {
+            Debug.LogError("Cannot abort mission - drone not initialized!");
+            return;
+        }
+        
         TransitionToState(FlightState.Abort);
     }
 
     /// <summary>
-    /// Forces the drone to return to hover state regardless of its current state.
-    /// Used for scenario transitions and reset.
+    /// Forces the drone to return to hover state regardless of its current state
     /// </summary>
     public void ReturnToHover()
     {
-        // Cancel any active scenario timers
-        if (_c0Coroutine != null)
+        if (!_isInitialized)
         {
-            StopCoroutine(_c0Coroutine);
-            _c0Coroutine = null;
+            Debug.LogError("Cannot return to hover - drone not initialized!");
+            return;
         }
         
-        // Force transition to hover regardless of current state
+        // Lock position during transition to prevent jumps
+        _positionLocked = true;
+        
+        Vector3 currentPos = _droneOffset.localPosition;
+        
+        // Set target position maintaining X and Z but targeting hover height
+        _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
+        
+        // Use consistent smooth time for all hover transitions
+        _positionSmoothTime = 1.0f;
+        
+        // Set flag to indicate we're calling from ReturnToHover
+        _calledFromReturnToHover = true;
+        
+        // Transition to hover state - this will preserve position
         TransitionToState(FlightState.Hover);
-    }
-
-    private void TransitionToState(FlightState newState)
-    {
-        // exit logic
-        switch (_state)
-        {
-            case FlightState.CruiseToTarget:
-                _navigation.OnArrived -= OnCruiseArrived;
-                break;
-            case FlightState.Hover:
-                if (_c0Coroutine != null)
-                    StopCoroutine(_c0Coroutine);
-                break;
-        }
-
-        _state = newState;
-
-        // Notify listeners of the state change
-        OnStateChanged?.Invoke(newState);
-
-        // enter logic
-        switch (_state)
-        {
-            case FlightState.Idle:          EnterIdle(); break;
-            case FlightState.Hover:         EnterHover(); break;
-            case FlightState.CruiseToTarget:EnterCruise(); break;
-            case FlightState.Landing:       EnterLanding(); break;
-            case FlightState.LandAbort:     EnterLandAbort(); break;
-            case FlightState.Abort:         EnterAbort(); break;
-        }
-    }
-
-    private void EnterIdle()
-    {
-        // motors off, but don't automatically change gear position
-        _rotorsSpinning = false;
-        _pidController.enabled = false;
-    }
-
-    private void EnterHover()
-    {
-        // begin smooth ascend/descend to hover height
+        
+        // Set ascending flag to track completion
         _isAscendingHover = true;
-
-        // start motors and sway, but don't automatically retract gear
-        _rotorsSpinning = true;
-        _pidController.enabled = true;
-    }
-
-    private IEnumerator C0AbortTimer()
-    {
-        yield return new WaitForSeconds(_c0Timeout);
-        Abort();
-    }
-
-    private void EnterCruise()
-    {
-        // Start rotors and enable sway, but don't automatically retract gear
-        _rotorsSpinning = true;
-        _pidController.enabled = true;
         
-        // Set destination for arrival detection only (movement handled by PerformCruise)
-        _navigation.SetDestination(_cruiseTargetPosition, _cruiseSpeed);
-        _navigation.OnArrived += OnCruiseArrived;
-        
-        // Setup movement transition
-        _moveStartPosition = _transform.position;
-        _movementProgress = 0f;
-        
-        // Calculate movement duration based on distance and cruise speed
-        float distance = Vector3.Distance(
-            new Vector3(_moveStartPosition.x, _hoverHeight, _moveStartPosition.z),
-            new Vector3(_cruiseTargetPosition.x, _hoverHeight, _cruiseTargetPosition.z));
-        _movementDuration = distance / _cruiseSpeed;
-        _isInTransition = true;
+        // Unlock position to allow smooth transition
+        _positionLocked = false;
     }
 
-    private void OnCruiseArrived()
-    {
-        TransitionToState(FlightState.Hover);
-    }
-
-    private void EnterLanding()
-    {
-        // Keep rotors spinning during landing, but don't automatically extend gear
-        _rotorsSpinning = true;
-        _pidController.enabled = true;
-        
-        // Setup movement transition
-        _moveStartPosition = _transform.position;
-        _movementProgress = 0f;
-        _movementDuration = Vector3.Distance(_moveStartPosition, _landingSpot) / _landingDescentSpeed;
-        _isInTransition = true;
-    }
-
-    private void PerformLanding()
-    {
-        // Increment progress along landing curve
-        if (_isInTransition)
-        {
-            _movementProgress += Time.deltaTime / _movementDuration;
-            if (_movementProgress >= 1f)
-            {
-                _movementProgress = 1f;
-                _isInTransition = false;
-            }
-            
-            // Apply landing curve for smooth motion
-            float curveValue = _landingCurve.Evaluate(_movementProgress);
-            _transform.position = Vector3.Lerp(_moveStartPosition, _landingSpot, curveValue);
-        }
-        else if (Vector3.Distance(_transform.position, _landingSpot) < 0.1f)
-        {
-            TransitionToState(FlightState.Idle);
-        }
-    }
-
-    private void EnterLandAbort()
-    {
-        // Keep rotors spinning during abort, but don't automatically retract gear
-        _rotorsSpinning = true;
-        _pidController.enabled = true;
-        
-        // Setup movement transition
-        _moveStartPosition = _transform.position;
-        Vector3 target = new Vector3(_transform.position.x, _hoverHeight, _transform.position.z);
-        _movementProgress = 0f;
-        _movementDuration = Vector3.Distance(_moveStartPosition, target) / _landingDescentSpeed;
-        _isInTransition = true;
-    }
-
-    private void PerformLandAbort()
-    {
-        // Calculate target hover position
-        Vector3 target = new Vector3(_transform.position.x, _hoverHeight, _transform.position.z);
-        
-        // Increment progress along abort curve
-        if (_isInTransition)
-        {
-            _movementProgress += Time.deltaTime / _movementDuration;
-            if (_movementProgress >= 1f)
-            {
-                _movementProgress = 1f;
-                _isInTransition = false;
-            }
-            
-            // Apply abort curve for smooth motion
-            float curveValue = _abortCurve.Evaluate(_movementProgress);
-            _transform.position = Vector3.Lerp(_moveStartPosition, target, curveValue);
-        }
-        else if (Mathf.Abs(_transform.position.y - _hoverHeight) < 0.1f)
-        {
-            TransitionToState(FlightState.Hover);
-        }
-    }
-
-    private void EnterAbort()
-    {
-        // Keep rotors spinning during abort, but don't automatically retract gear
-        _rotorsSpinning = true;
-        _pidController.enabled = true;
-        
-        // Setup movement transition
-        _moveStartPosition = _transform.position;
-        Vector3 target = new Vector3(_transform.position.x, _abortClimbHeight, _transform.position.z);
-        _movementProgress = 0f;
-        _movementDuration = Vector3.Distance(_moveStartPosition, target) / _cruiseSpeed;
-        _isInTransition = true;
-    }
-
-    private void PerformAbort()
-    {
-        // Calculate target abort position
-        Vector3 target = new Vector3(_transform.position.x, _abortClimbHeight, _transform.position.z);
-        
-        // Increment progress along abort curve
-        if (_isInTransition)
-        {
-            _movementProgress += Time.deltaTime / _movementDuration;
-            if (_movementProgress >= 1f)
-            {
-                _movementProgress = 1f;
-                _isInTransition = false;
-            }
-            
-            // Apply abort curve for smooth motion
-            float curveValue = _abortCurve.Evaluate(_movementProgress);
-            _transform.position = Vector3.Lerp(_moveStartPosition, target, curveValue);
-        }
-        else if (_transform.position.y >= _abortClimbHeight - 0.1f)
-        {
-            Destroy(gameObject);
-        }
-    }
-
-    private void SpinRotors()
-    {
-        float deg = _rotorSpeed * Time.deltaTime;
-        foreach (var prop in _propellers)
-            prop.Rotate(0f, 0f, deg, Space.Self);
-    }
-
-    private void StartGearAnimation(float targetAngle)
-    {
-        _gearTargetAngle = targetAngle;
-        _gearAnimating = true;
-    }
-
-    private void AnimateLegs()
-    {
-        bool done = true;
-        
-        for (int i = 0; i < _legs.Length; i++)
-        {
-            Transform leg = _legs[i];
-            Vector3 euler = leg.localEulerAngles;
-            
-            // Extract current angles, handling wraparound
-            float angleX = euler.x > 180f ? euler.x - 360f : euler.x;
-            float angleY = euler.y > 180f ? euler.y - 360f : euler.y;
-            float angleZ = euler.z > 180f ? euler.z - 360f : euler.z;
-            
-            // Apply rotation based on leg type
-            switch (_legRotationTypes[i])
-            {
-                case LegRotationType.RotateOnX:
-                    angleX = Mathf.MoveTowards(angleX, _gearTargetAngle, _legRotateSpeed * Time.deltaTime);
-                    break;
-                case LegRotationType.RotateOnY:
-                    angleY = Mathf.MoveTowards(angleY, _gearTargetAngle, _legRotateSpeed * Time.deltaTime);
-                    break;
-                case LegRotationType.RotateOnZ:
-                    angleZ = Mathf.MoveTowards(angleZ, _gearTargetAngle, _legRotateSpeed * Time.deltaTime);
-                    break;
-                case LegRotationType.RotateOnNegativeX:
-                    angleX = Mathf.MoveTowards(angleX, -_gearTargetAngle, _legRotateSpeed * Time.deltaTime);
-                    break;
-                case LegRotationType.RotateOnNegativeY:
-                    angleY = Mathf.MoveTowards(angleY, -_gearTargetAngle, _legRotateSpeed * Time.deltaTime);
-                    break;
-                case LegRotationType.RotateOnNegativeZ:
-                    angleZ = Mathf.MoveTowards(angleZ, -_gearTargetAngle, _legRotateSpeed * Time.deltaTime);
-                    break;
-            }
-            
-            // Apply the new rotation
-            leg.localEulerAngles = new Vector3(angleX, angleY, angleZ);
-            
-            // Check if this leg is at target position
-            bool legAtTarget = false;
-            switch (_legRotationTypes[i])
-            {
-                case LegRotationType.RotateOnX:
-                    legAtTarget = Mathf.Abs(angleX - _gearTargetAngle) < 0.1f;
-                    break;
-                case LegRotationType.RotateOnY:
-                    legAtTarget = Mathf.Abs(angleY - _gearTargetAngle) < 0.1f;
-                    break;
-                case LegRotationType.RotateOnZ:
-                    legAtTarget = Mathf.Abs(angleZ - _gearTargetAngle) < 0.1f;
-                    break;
-                case LegRotationType.RotateOnNegativeX:
-                    legAtTarget = Mathf.Abs(angleX - (-_gearTargetAngle)) < 0.1f;
-                    break;
-                case LegRotationType.RotateOnNegativeY:
-                    legAtTarget = Mathf.Abs(angleY - (-_gearTargetAngle)) < 0.1f;
-                    break;
-                case LegRotationType.RotateOnNegativeZ:
-                    legAtTarget = Mathf.Abs(angleZ - (-_gearTargetAngle)) < 0.1f;
-                    break;
-            }
-            
-            if (!legAtTarget)
-            {
-                done = false;
-            }
-        }
-        
-        if (done) _gearAnimating = false;
-    }
-
-    /// <summary>
-    /// Perform direct cruise movement toward target position
-    /// </summary>
-    private void PerformCruise()
-    {
-        // Use cruise movement curve for smooth acceleration/deceleration
-        if (_isInTransition)
-        {
-            _movementProgress += Time.deltaTime / _movementDuration;
-            if (_movementProgress >= 1f)
-            {
-                _movementProgress = 1f;
-                _isInTransition = false;
-            }
-            
-            // Apply cruise curve for smooth motion
-            float curveValue = _cruiseMovementCurve.Evaluate(_movementProgress);
-            Vector3 targetPos = new Vector3(_cruiseTargetPosition.x, _hoverHeight, _cruiseTargetPosition.z);
-            Vector3 startPos = new Vector3(_moveStartPosition.x, _hoverHeight, _moveStartPosition.z);
-            _transform.position = Vector3.Lerp(startPos, targetPos, curveValue);
-        }
-        else
-        {
-            // If we've completed the curve transition but haven't yet triggered arrival
-            // (this handles small discrepancies or moving targets)
-            _transform.position = Vector3.MoveTowards(
-                _transform.position, 
-                new Vector3(_cruiseTargetPosition.x, _hoverHeight, _cruiseTargetPosition.z), 
-                _cruiseSpeed * Time.deltaTime);
-        }
-    }
-    
-    /// <summary>
-    /// Update drone rotation to face movement direction or participant
-    /// </summary>
-    private void UpdateRotation()
-    {
-        if (_state == FlightState.CruiseToTarget && _faceMovementDirection)
-        {
-            // Get movement direction in XZ plane
-            Vector3 movement = new Vector3(_cruiseTargetPosition.x, 0, _cruiseTargetPosition.z) - 
-                              new Vector3(_transform.position.x, 0, _transform.position.z);
-            
-            if (movement.magnitude > 0.1f)
-            {
-                // Calculate target rotation to face movement direction
-                Quaternion targetRotation = Quaternion.LookRotation(movement);
-                
-                // Smooth rotation
-                _transform.rotation = Quaternion.Slerp(
-                    _transform.rotation, 
-                    targetRotation, 
-                    _rotationSpeed * Time.deltaTime);
-            }
-        }
-        else if (_state == FlightState.Hover && _faceParticipant && _participantTransform != null)
-        {
-            // Face the participant when hovering
-            Vector3 direction = new Vector3(_participantTransform.position.x, 0, _participantTransform.position.z) - 
-                               new Vector3(_transform.position.x, 0, _transform.position.z);
-            
-            if (direction.magnitude > 0.1f)
-            {
-                // Calculate target rotation to face participant
-                Quaternion targetRotation = Quaternion.LookRotation(direction);
-                
-                // Smooth rotation
-                _transform.rotation = Quaternion.Slerp(
-                    _transform.rotation, 
-                    targetRotation, 
-                    _rotationSpeed * Time.deltaTime);
-            }
-        }
-    }
-
-    // Initialize leg rotation types if not already set
-    private void InitializeLegRotationTypes()
-    {
-        // Make sure we have the right number of rotation types
-        if (_legRotationTypes == null || _legRotationTypes.Length != _legs.Length)
-        {
-            _legRotationTypes = new LegRotationType[_legs.Length];
-            // Default to X rotation
-            for (int i = 0; i < _legs.Length; i++)
-            {
-                _legRotationTypes[i] = LegRotationType.RotateOnX;
-            }
-        }
-    }
-
-    // Reset all legs to their default position (for testing/debugging)
-    public void ResetLegs()
-    {
-        foreach (var leg in _legs)
-        {
-            leg.localEulerAngles = Vector3.zero;
-        }
-    }
-
-    // Add public methods to control leg retraction/extension independently
-    
     /// <summary>
     /// Retracts the drone legs (for flight mode)
     /// </summary>
@@ -671,5 +1002,475 @@ public class DroneController : MonoBehaviour
     public bool AreLegsExtended()
     {
         return !_gearAnimating && Mathf.Approximately(_gearTargetAngle, 0f);
+    }
+    
+    /// <summary>
+    /// Enable or disable the scanning behavior of the drone
+    /// </summary>
+    public void EnableScanning(bool enable)
+    {
+        _enableScanning = enable;
+    }
+    
+    /// <summary>
+    /// Face the current movement direction
+    /// </summary>
+    private void FaceMovementDirection()
+    {
+        // Store original position
+        Vector3 originalPosition = _droneOffset.localPosition;
+        
+        // Get movement direction in XZ plane (world space)
+        Vector3 movement = new Vector3(_cruiseTargetPosition.x, 0, _cruiseTargetPosition.z) - 
+                          new Vector3(_transform.position.x + _droneOffset.localPosition.x, 0, 
+                                     _transform.position.z + _droneOffset.localPosition.z);
+        
+        if (movement.magnitude > 0.1f)
+        {
+            // Calculate target rotation to face movement direction
+            Quaternion targetRotation = Quaternion.LookRotation(movement);
+            
+            // Smooth rotation - apply to the offset transform
+            _droneOffset.rotation = Quaternion.Slerp(
+                _droneOffset.rotation, 
+                targetRotation, 
+                _rotationSpeed * Time.deltaTime);
+        }
+        
+        // Preserve original position to prevent jumping
+        _droneOffset.localPosition = originalPosition;
+    }
+
+    /// <summary>
+    /// Temporarily increase rotation speed for faster response
+    /// </summary>
+    private IEnumerator TemporarilyBoostTrackingSpeed()
+    {
+        float originalSpeed = _rotationSpeed;
+        _rotationSpeed *= 2.0f;
+        
+        yield return new WaitForSeconds(1.0f);
+        
+        _rotationSpeed = originalSpeed;
+    }
+    
+    #endregion
+    
+    #region Utility Methods
+
+    /// <summary>
+    /// Callback when cruise arrives at destination
+    /// </summary>
+    private void OnCruiseArrived()
+    {
+        // Mark transition as complete
+        _isInTransition = false;
+        
+        // Clean up navigation event listener
+        if (_navigation != null)
+        {
+            _navigation.OnArrived -= OnCruiseArrived;
+        }
+        
+        // Switch back to hover state
+        TransitionToState(FlightState.Hover);
+    }
+
+    /// <summary>
+    /// Converts a world space position to local space relative to the drone root
+    /// </summary>
+    private Vector3 WorldToLocalPoint(Vector3 worldPoint)
+    {
+        return _transform.InverseTransformPoint(worldPoint);
+    }
+    
+    /// <summary>
+    /// Spins all propellers based on rotor speed
+    /// </summary>
+    private void SpinRotors()
+    {
+        float deg = _rotorSpeed * Time.deltaTime;
+        foreach (var prop in _propellers)
+        {
+            if (prop != null)
+            {
+            prop.Rotate(0f, 0f, deg, Space.Self);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Start gear animation with target angle
+    /// </summary>
+    private void StartGearAnimation(float targetAngle)
+    {
+        _gearTargetAngle = targetAngle;
+        _gearAnimating = true;
+    }
+
+    /// <summary>
+    /// Animate legs toward target angle
+    /// </summary>
+    private void AnimateLegs()
+    {
+        if (_legConfigs == null || _legConfigs.Length == 0) return;
+        bool done = true;
+        for (int i = 0; i < _legConfigs.Length; i++)
+        {
+            var config = _legConfigs[i];
+            if (config == null || !config.enabled || config.legTransform == null) continue;
+            Transform leg = config.legTransform;
+            Quaternion currentRotation = leg.localRotation;
+            float targetAngle = _gearTargetAngle == 0f ? config.extendedAngle : 0f;
+            if (config.invertDirection) targetAngle = -targetAngle;
+            // Use the axis in the leg's local space
+            Vector3 localAxis = config.GetRotationAxisVector();
+            Vector3 axis = leg.TransformDirection(localAxis); // axis in world space
+            Quaternion targetRotation = Quaternion.AngleAxis(targetAngle, axis);
+            leg.localRotation = Quaternion.RotateTowards(currentRotation, targetRotation, _legRotateSpeed * Time.deltaTime);
+            if (Quaternion.Angle(leg.localRotation, targetRotation) > 0.1f) done = false;
+        }
+        if (done) _gearAnimating = false;
+    }
+
+    /// <summary>
+    /// Initialize leg configurations
+    /// </summary>
+    private void InitializeLegConfigs()
+    {
+        if (_legConfigs == null || _legConfigs.Length == 0) return; // Only initialize if configs are set
+        foreach (var legConfig in _legConfigs)
+        {
+            if (legConfig != null && legConfig.legTransform != null)
+            {
+                Debug.Log($"Initialized leg configuration: {legConfig.legTransform.name}, Axis: {legConfig.rotationAxis}, Extended Angle: {legConfig.extendedAngle}, Invert: {legConfig.invertDirection}");
+            }
+        }
+        Debug.Log($"Initialized {_legConfigs.Length} leg configurations for drone");
+    }
+    
+    /// <summary>
+    /// Apply a realistic tilt based on movement direction and speed
+    /// </summary>
+    private void ApplyMovementTilt(Vector3 moveDirection, float speedFactor)
+    {
+        if (moveDirection.magnitude < 0.01f) return;
+        
+        // Get elapsed time for variations
+        float time = Time.time;
+        
+        // Perlin noise for natural variation based on time
+        // Use different sampling points for pitch and roll variations
+        float pitchNoise = Mathf.PerlinNoise(time * 0.6f, 23.4f);
+        float rollNoise = Mathf.PerlinNoise(41.2f, time * 0.5f);
+        
+        // Map from 0-1 to -1 to 1 range, but reduce range by 25% for less erratic movement
+        pitchNoise = ((pitchNoise * 2f) - 1f) * 0.75f;
+        rollNoise = ((rollNoise * 2f) - 1f) * 0.75f;
+        
+        // Create variability that changes over time, influenced by speed but not proportional
+        // Reduce variability by 25% for more stable movement
+        float dynamicVariability = _tiltVariability * 0.75f * (0.8f + 0.4f * Mathf.PerlinNoise(time * 0.3f, time * 0.7f));
+        
+        // Apply dynamic variability based on perlin noise
+        float randomFactor = 1f + (pitchNoise * rollNoise) * dynamicVariability;
+        
+        // Calculate base tilt proportional to speed, with dynamic range
+        float tiltAmount = _baseTiltAngle + (_speedTiltAngle * speedFactor * speedFactor) * randomFactor;
+        
+        // Calculate tilt based on movement direction
+        // Forward movement = pitch down, backward = pitch up
+        float pitchAngle = -moveDirection.z * tiltAmount;
+        
+        // Right movement = roll right, left = roll left
+        float rollAngle = moveDirection.x * tiltAmount;
+        
+        // Add wind influence that changes over time - reduced by 25% for stability
+        float windStrength = _windInfluence * 0.75f * Mathf.PerlinNoise(time * 0.2f, 0);
+        float windDirection = Mathf.PerlinNoise(0, time * 0.17f) * 360f;
+        
+        // Wind affects roll and pitch differently
+        float windPitch = Mathf.Sin(windDirection * Mathf.Deg2Rad) * windStrength;
+        float windRoll = Mathf.Cos(windDirection * Mathf.Deg2Rad) * windStrength;
+        
+        // Subtle micro-movements using Perlin noise with different frequencies - reduced by 25%
+        float microPitch = (Mathf.PerlinNoise(time * 1.2f, time * 0.7f) * 2f - 1f) * 0.75f;
+        float microRoll = (Mathf.PerlinNoise(time * 0.9f, time * 1.4f) * 2f - 1f) * 0.75f;
+        float microYaw = (Mathf.PerlinNoise(time * 0.7f, time * 1.1f) * 2f - 1f) * 0.75f;
+        
+        // Scale micro-movements
+        microPitch *= _microMovementStrength;
+        microRoll *= _microMovementStrength;
+        microYaw *= _microMovementStrength * 0.5f; // Less yaw movement
+        
+        // Apply micro-movements to pitch and roll
+        pitchAngle += microPitch + windPitch;
+        rollAngle += microRoll + windRoll;
+        
+        // Get current rotation excluding tilt (just the yaw)
+        Vector3 currentRotation = _droneOffset.rotation.eulerAngles;
+        float yaw = currentRotation.y;
+        
+        // Add micro-yaw to current yaw
+        yaw += microYaw;
+        
+        // Adjust pitch and roll to align with the drone's current yaw
+        float finalPitch = pitchAngle * Mathf.Cos(yaw * Mathf.Deg2Rad) - rollAngle * Mathf.Sin(yaw * Mathf.Deg2Rad);
+        float finalRoll = rollAngle * Mathf.Cos(yaw * Mathf.Deg2Rad) + pitchAngle * Mathf.Sin(yaw * Mathf.Deg2Rad);
+        
+        // Create target rotation with tilt applied
+        Quaternion targetTilt = Quaternion.Euler(finalPitch, yaw, finalRoll);
+        
+        // Apply tilt with varied speed based on movement
+        float tiltSpeed = _rotationSpeed * (0.7f + speedFactor * 0.6f + Mathf.PerlinNoise(time * 0.4f, 0) * 0.3f);
+        _droneOffset.rotation = Quaternion.Slerp(_droneOffset.rotation, targetTilt, tiltSpeed * Time.deltaTime);
+    }
+    
+    /// <summary>
+    /// Gradually recover from tilt when not moving with subtle movements even at rest
+    /// </summary>
+    private void RecoverFromTilt()
+    {
+        // Get current rotation
+        Vector3 currentRotation = _droneOffset.rotation.eulerAngles;
+        
+        // Normalize angles to -180 to 180
+        float pitch = currentRotation.x > 180 ? currentRotation.x - 360 : currentRotation.x;
+        float roll = currentRotation.z > 180 ? currentRotation.z - 360 : currentRotation.z;
+        float yaw = currentRotation.y;
+        
+        // Get time values for oscillations
+        float time = Time.time;
+        
+        // Apply subtle oscillations in hover
+        if (_enableMicroMovements)
+        {
+            // Multi-frequency oscillations for more organic movement
+            float pitchOsc1 = Mathf.Sin(time * 0.77f * _oscillationSpeed) * _pitchOscillationStrength * 0.7f;
+            float pitchOsc2 = Mathf.Sin(time * 1.31f * _oscillationSpeed) * _pitchOscillationStrength * 0.3f;
+            float rollOsc1 = Mathf.Cos(time * 0.85f * _oscillationSpeed) * _rollOscillationStrength * 0.7f;
+            float rollOsc2 = Mathf.Cos(time * 1.43f * _oscillationSpeed) * _rollOscillationStrength * 0.3f;
+            
+            // Add subtle wind influence
+            float windPitch = Mathf.PerlinNoise(time * 0.13f, 0) * 2f - 1f;
+            float windRoll = Mathf.PerlinNoise(0, time * 0.11f) * 2f - 1f;
+            
+            // Calculate target oscillation values
+            float targetPitch = pitchOsc1 + pitchOsc2 + (windPitch * _windInfluence);
+            float targetRoll = rollOsc1 + rollOsc2 + (windRoll * _windInfluence);
+            
+            // Vary recovery speed slightly with Perlin noise
+            float recoveryVariation = 0.8f + (Mathf.PerlinNoise(time * 0.27f, time * 0.31f) * 0.4f);
+            float finalRecoverySpeed = _tiltRecoverySpeed * recoveryVariation * Time.deltaTime;
+            
+            // Apply recovery toward oscillation values instead of zero
+            pitch = Mathf.Lerp(pitch, targetPitch, finalRecoverySpeed);
+            roll = Mathf.Lerp(roll, targetRoll, finalRecoverySpeed);
+            
+            // Add subtle yaw drift
+            float yawDrift = Mathf.PerlinNoise(time * 0.07f, time * 0.19f) * 2f - 1f;
+            yaw += yawDrift * _microMovementStrength * 0.3f * Time.deltaTime;
+        }
+        else
+        {
+            // Standard recovery toward level when micro-movements disabled
+            float pitchStep = Mathf.Sign(pitch) * Mathf.Min(Mathf.Abs(pitch), _tiltRecoverySpeed * Time.deltaTime);
+            float rollStep = Mathf.Sign(roll) * Mathf.Min(Mathf.Abs(roll), _tiltRecoverySpeed * Time.deltaTime);
+            
+            // Apply recovery
+            pitch -= pitchStep;
+            roll -= rollStep;
+        }
+        
+        // Apply the new rotation
+        _droneOffset.rotation = Quaternion.Euler(pitch, yaw, roll);
+    }
+    
+    /// <summary>
+    /// Gets an approximation of the speed factor from an animation curve at a specific time
+    /// Higher values indicate faster change rates at that point in the curve
+    /// </summary>
+    private float GetCurveSpeedFactor(AnimationCurve curve, float time)
+    {
+        // Simple approximation of curve derivative (speed) at the given time
+        // We sample the curve slightly before and after the current time
+        const float delta = 0.05f;
+        
+        float timeBefore = Mathf.Max(0, time - delta);
+        float timeAfter = Mathf.Min(1, time + delta);
+        
+        float valueBefore = curve.Evaluate(timeBefore);
+        float valueAfter = curve.Evaluate(timeAfter);
+        
+        // Approximate the first derivative (rate of change)
+        float derivative = (valueAfter - valueBefore) / (timeAfter - timeBefore);
+        
+        // Normalize to a 0-1 range (assuming typical curve derivatives)
+        return Mathf.Clamp01(Mathf.Abs(derivative) / 2.0f);
+    }
+    
+    /// <summary>
+    /// Logs detailed position information for debugging transitional jumps
+    /// </summary>
+    private void LogPositionDebug(string context, Vector3 position)
+    {
+        // No debug logs or conditional blocks should reference _nonTrackingStates, _faceMovementDirection, _scanCycleProgress, _showParticipantDebug, _participantTrackingActive, or related debug or participant tracking logic.
+    }
+
+    /// <summary>
+    /// Enables detailed position logging during state changes and transitions
+    /// Can be called from ScenarioManager for diagnostics
+    /// </summary>
+    public void EnablePositionDebugging(bool enable)
+    {
+        // No debug logs or conditional blocks should reference _nonTrackingStates, _faceMovementDirection, _scanCycleProgress, _showParticipantDebug, _participantTrackingActive, or related debug or participant tracking logic.
+    }
+    
+    /// <summary>
+    /// Last chance verification of drone position to prevent flying away or disappearing
+    /// </summary>
+    private void FixedUpdate()
+    {
+        // Skip if not initialized
+        if (!_isInitialized) return;
+        
+        // SAFETY CHECK: Prevent the drone from moving to extreme positions
+        if (_droneOffset != null)
+        {
+            Vector3 currentPos = _droneOffset.localPosition;
+            bool positionFixed = false;
+            
+            // Check for NaN or infinity values (rare but catastrophic)
+            if (float.IsNaN(currentPos.x) || float.IsNaN(currentPos.y) || float.IsNaN(currentPos.z) ||
+                float.IsInfinity(currentPos.x) || float.IsInfinity(currentPos.y) || float.IsInfinity(currentPos.z))
+            {
+                Debug.LogError("CRITICAL ERROR: Drone position contains NaN or infinity! Resetting to origin.");
+                _droneOffset.localPosition = Vector3.zero;
+                positionFixed = true;
+            }
+            
+            // Check for extreme local positions indicating something went wrong
+            float maxAllowedLocalPosition = 200f;
+            if (Mathf.Abs(currentPos.x) > maxAllowedLocalPosition || 
+                Mathf.Abs(currentPos.y) > maxAllowedLocalPosition ||
+                Mathf.Abs(currentPos.z) > maxAllowedLocalPosition)
+            {
+                Debug.LogError($"CRITICAL ERROR: Drone position is extreme! {currentPos} - Clamping to safe values.");
+                _droneOffset.localPosition = new Vector3(
+                    Mathf.Clamp(currentPos.x, -maxAllowedLocalPosition, maxAllowedLocalPosition),
+                    Mathf.Clamp(currentPos.y, 0f, maxAllowedLocalPosition),
+                    Mathf.Clamp(currentPos.z, -maxAllowedLocalPosition, maxAllowedLocalPosition)
+                );
+                positionFixed = true;
+            }
+            
+            // Reset target position and velocity if we had to fix the position
+            if (positionFixed)
+            {
+                // Reset velocity and target to current position
+                _currentVelocity = Vector3.zero;
+                _targetPosition = _droneOffset.localPosition;
+                
+                // Force drone to return to hover
+                StartCoroutine(EmergencyReturnToHover());
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Emergency procedure to return drone to safe hover state
+    /// </summary>
+    private IEnumerator EmergencyReturnToHover()
+    {
+        // Wait a frame to allow other systems to stabilize
+        yield return null;
+        
+        Debug.LogWarning("Emergency procedure: Returning drone to hover state");
+        
+        // Disable all complex behaviors first
+        _positionLocked = true;
+        if (_pidController != null) _pidController.enabled = false;
+        _enableScanning = false;
+        
+        // Reset target to safe hover position
+        Vector3 currentPos = _droneOffset.localPosition;
+        _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
+        
+        // Set a slower smooth time for safety
+        _positionSmoothTime = 1.5f;
+        
+        // Wait a bit then unlock
+        yield return new WaitForSeconds(0.5f);
+        _positionLocked = false;
+        
+        // Transition to hover after position stabilizes
+        yield return new WaitForSeconds(1.0f);
+        TransitionToState(FlightState.Hover);
+    }
+    
+    private void UpdateHMDTracking()
+    {
+        if (_hmdTransform == null) return;
+
+        // Calculate direction to HMD
+        Vector3 hmdPosition = _hmdTransform.position;
+        Vector3 directionToHMD = hmdPosition - transform.position;
+        directionToHMD.y = 0; // Keep rotation only in horizontal plane
+
+        // Smoothly update target direction with delay
+        _hmdTrackingTimer += Time.deltaTime;
+        if (_hmdTrackingTimer >= _hmdTrackingDelay)
+        {
+            _targetHmdDirection = directionToHMD.normalized;
+            _hmdTrackingTimer = 0f;
+        }
+
+        // Calculate target rotation
+        Quaternion targetRotation = Quaternion.LookRotation(_targetHmdDirection);
+        
+        // Limit rotation angle
+        float currentAngle = Quaternion.Angle(transform.rotation, targetRotation);
+        if (currentAngle > _maxHmdRotationAngle)
+        {
+            targetRotation = Quaternion.RotateTowards(
+                transform.rotation,
+                targetRotation,
+                _maxHmdRotationAngle
+            );
+        }
+
+        // Smoothly rotate towards target
+        transform.rotation = Quaternion.Slerp(
+            transform.rotation,
+            targetRotation,
+            _hmdTrackingSpeed * Time.deltaTime
+        );
+    }
+    
+    #endregion
+}
+
+[System.Serializable]
+public class LegConfig
+{
+    [Tooltip("Enable this leg for animation")] public bool enabled = false;
+    public Transform legTransform;
+    [Tooltip("Which axis to rotate around (X = Red, Y = Green, Z = Blue)")]
+    public enum RotationAxis { X, Y, Z }
+    public RotationAxis rotationAxis = RotationAxis.X;
+    [Tooltip("Angle to rotate when extended (positive = clockwise, negative = counter-clockwise)")]
+    [Range(-90f, 90f)]
+    public float extendedAngle = -30f;
+    [Tooltip("Whether to invert the rotation direction")]
+    public bool invertDirection = false;
+    public Vector3 GetRotationAxisVector()
+    {
+        switch (rotationAxis)
+        {
+            case RotationAxis.X: return Vector3.right;
+            case RotationAxis.Y: return Vector3.up;
+            case RotationAxis.Z: return Vector3.forward;
+            default: return Vector3.right;
+        }
     }
 }

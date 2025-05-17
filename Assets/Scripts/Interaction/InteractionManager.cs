@@ -69,7 +69,54 @@ public class InteractionManager : MonoBehaviour
     /// </summary>
     public Vector3 RandomizeC0Position()
     {
-        return _zoneRandomizer.RandomizeTargetPosition(_c0ZoneIndex);
+        // Ensure we have a valid zone randomizer
+        if (_zoneRandomizer == null)
+        {
+            Debug.LogError("ZoneRandomizer reference is missing on InteractionManager!");
+            return transform.position; // Return current position as fallback
+        }
+
+        // Get the current position before randomizing to ensure we're genuinely moving
+        Vector3 currentPosition = _zoneRandomizer.GetTarget(_c0ZoneIndex)?.position ?? Vector3.zero;
+        
+        // Try to find a position that's sufficiently different from the current one
+        Vector3 newPosition = Vector3.zero;
+        bool validPositionFound = false;
+        
+        // Maximum retry attempts to avoid infinite loops
+        const int maxAttempts = 10;
+        int attempts = 0;
+        
+        while (!validPositionFound && attempts < maxAttempts)
+        {
+            // Generate a random position
+            newPosition = _zoneRandomizer.RandomizeTargetPosition(_c0ZoneIndex);
+            
+            // Calculate horizontal distance from current position (ignore Y)
+            float distance = Vector2.Distance(
+                new Vector2(currentPosition.x, currentPosition.z), 
+                new Vector2(newPosition.x, newPosition.z));
+            
+            // If we have a reasonable distance, accept it
+            // Minimum distance should be at least 1/4 of the zone radius
+            float minDistance = _zoneRandomizer.GetZoneRadius(_c0ZoneIndex) * 0.25f;
+            
+            if (distance > minDistance)
+            {
+                validPositionFound = true;
+                Debug.Log($"RandomizeC0Position: Found new position at distance {distance:F2}m from previous position");
+            }
+            
+            attempts++;
+        }
+        
+        // If we failed to find a good position after max attempts, use the last generated one
+        if (!validPositionFound)
+        {
+            Debug.LogWarning("RandomizeC0Position: Could not find position with sufficient distance after max attempts");
+        }
+        
+        return newPosition;
     }
     
     /// <summary>
@@ -77,7 +124,20 @@ public class InteractionManager : MonoBehaviour
     /// </summary>
     public Vector3 GetC0TargetPosition()
     {
-        return _zoneRandomizer.GetTarget(_c0ZoneIndex).position;
+        if (_zoneRandomizer == null)
+        {
+            Debug.LogError("ZoneRandomizer reference is missing on InteractionManager!");
+            return transform.position; // Return current position as fallback
+        }
+        
+        Transform target = _zoneRandomizer.GetTarget(_c0ZoneIndex);
+        if (target == null)
+        {
+            Debug.LogError($"C0 target transform not found at index {_c0ZoneIndex}!");
+            return transform.position; // Return current position as fallback
+        }
+        
+        return target.position;
     }
     
     /// <summary>
@@ -238,9 +298,6 @@ public class InteractionManager : MonoBehaviour
     
     private void HandleConfirmInternal(Vector3 position)
     {
-        // Tell the drone to land at the position
-        _droneController.BeginLanding(position);
-        
         // Mark as answered to complete the scenario
         StopActiveCoroutine();
         IsC1Completed = true;
@@ -254,8 +311,9 @@ public class InteractionManager : MonoBehaviour
     
     private void HandleGuidanceInternal(Vector3 position)
     {
-        // Tell the drone to cruise to the guidance position
-        _droneController.StartCruiseTo(position);
+        // Mark as answered to complete the scenario
+        StopActiveCoroutine();
+        IsC2Completed = true;
     }
     
     private void StopActiveCoroutine()
