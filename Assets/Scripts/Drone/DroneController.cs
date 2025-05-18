@@ -151,6 +151,12 @@ public class DroneController : MonoBehaviour
     private Vector3 _targetHmdDirection;
     private float _hmdTrackingTimer;
     
+    // Add new private fields
+    private float _accelerationTime = 0.5f;
+    private float _decelerationTime = 0.8f;
+    private float _minSmoothTime = 0.5f;
+    private float _maxAbortSpeed = 4f;
+    
     #endregion
     
     #region Initialization & Setup
@@ -193,13 +199,17 @@ public class DroneController : MonoBehaviour
     /// This must be called before using the drone
     /// </summary>
     public void Initialize(float hoverHeight, float hoverMovementSpeed, float cruiseSpeed, 
-                          float abortClimbHeight, float landingDescentSpeed)
+                          float abortClimbHeight, float landingDescentSpeed, float accelerationTime, float decelerationTime, float minSmoothTime, float maxAbortSpeed)
     {
         _hoverHeight = hoverHeight;
         _hoverMovementSpeed = hoverMovementSpeed;
         _cruiseSpeed = cruiseSpeed;
         _abortClimbHeight = abortClimbHeight;
         _landingDescentSpeed = landingDescentSpeed;
+        _accelerationTime = accelerationTime;
+        _decelerationTime = decelerationTime;
+        _minSmoothTime = minSmoothTime;
+        _maxAbortSpeed = maxAbortSpeed;
         
         // Auto-find HMI component if not assigned
         if (_hmi == null)
@@ -230,14 +240,11 @@ public class DroneController : MonoBehaviour
             Debug.LogError("Cannot start drone hover - drone not initialized! Call Initialize first.");
             return;
         }
-        
         // Initialize target position at hover height
         Vector3 currentPos = _droneOffset.localPosition;
         _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
-        
-        // Use a smoother transition for initial hover
-        _positionSmoothTime = 0.5f;
-        
+        // Use Inspector parameter for initial hover smoothing
+        _positionSmoothTime = _minSmoothTime;
         // Transition to hover state
         TransitionToState(FlightState.Hover);
     }
@@ -441,6 +448,7 @@ public class DroneController : MonoBehaviour
     {
         Vector3 currentPos = _droneOffset.localPosition;
         _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
+        _positionSmoothTime = _minSmoothTime;
         Debug.Log($"DRONE_Y_DEBUG: EnterHover | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2} (hoverHeight={_hoverHeight:F2})");
         // Start motors and PID sway
         _rotorsSpinning = true;
@@ -494,64 +502,36 @@ public class DroneController : MonoBehaviour
 
     private void EnterCruise()
     {
-        // Start rotors and enable sway after a delay
         _rotorsSpinning = true;
-        
-        // Start propeller sounds with slightly higher pitch for cruise
         if (_hmi != null)
         {
             _hmi.PlayHoverHum();
-            _hmi.SetPropellerPitch(1.1f); // Slightly higher pitch for cruising
+            _hmi.SetPropellerPitch(1.1f);
         }
-        
-        // Set destination for arrival detection
         _navigation.SetDestination(_cruiseTargetPosition, _cruiseSpeed);
         _navigation.OnArrived += OnCruiseArrived;
-        
-        // Convert world target to local offset position
         Vector3 targetLocalPos = WorldToLocalPoint(_cruiseTargetPosition);
-        
-        // Set the target position (maintaining hover height)
         _targetPosition = new Vector3(targetLocalPos.x, _hoverHeight, targetLocalPos.z);
         Debug.Log($"DRONE_Y_DEBUG: EnterCruise | localY={_droneOffset.localPosition.y:F2} -> targetY={_targetPosition.y:F2} (hoverHeight={_hoverHeight:F2})");
-        
-        // Calculate movement duration based on distance and cruise speed
-        float distance = Vector3.Distance(
-            new Vector3(_droneOffset.localPosition.x, _hoverHeight, _droneOffset.localPosition.z),
-            new Vector3(_targetPosition.x, _hoverHeight, _targetPosition.z));
-            
-        // Set smoother transition for longer distances - reduced base smooth time and increased speed factor
-        _positionSmoothTime = Mathf.Max(0.5f, distance / (_cruiseSpeed * 2.5f));  // Reduced from 0.8f and increased speed factor
+        float distance = Vector3.Distance(new Vector3(_droneOffset.localPosition.x, _hoverHeight, _droneOffset.localPosition.z), new Vector3(_targetPosition.x, _hoverHeight, _targetPosition.z));
+        _positionSmoothTime = Mathf.Max(_minSmoothTime, distance / _cruiseSpeed);
     }
 
     private void EnterLanding()
     {
-        // Make sure we preserve the current position initially
         Vector3 currentPos = _droneOffset.localPosition;
-        
         try
         {
-            // Convert world landing spot to local position with error handling
             Vector3 targetLocalPos = WorldToLocalPoint(_landingSpot);
-            
-            // SAFETY CHECK: Validate the conversion result
-            if (float.IsNaN(targetLocalPos.x) || float.IsNaN(targetLocalPos.y) || float.IsNaN(targetLocalPos.z) ||
-                float.IsInfinity(targetLocalPos.x) || float.IsInfinity(targetLocalPos.y) || float.IsInfinity(targetLocalPos.z))
+            if (float.IsNaN(targetLocalPos.x) || float.IsNaN(targetLocalPos.y) || float.IsNaN(targetLocalPos.z) || float.IsInfinity(targetLocalPos.x) || float.IsInfinity(targetLocalPos.y) || float.IsInfinity(targetLocalPos.z))
             {
                 Debug.LogError($"Invalid target position after world-to-local conversion: {targetLocalPos}. Using safe position.");
-                
-                // Use current position but with lower Y value for safe landing
                 targetLocalPos = new Vector3(currentPos.x, 0.1f, currentPos.z);
             }
-            
-            // Set target position for unified control with safety limits
             _targetPosition = targetLocalPos;
-            
-            // SAFETY CHECK: Ensure reasonable horizontal distance
             Vector2 currentHorizontal = new Vector2(currentPos.x, currentPos.z);
             Vector2 targetHorizontal = new Vector2(_targetPosition.x, _targetPosition.z);
             float horizontalDistance = Vector2.Distance(currentHorizontal, targetHorizontal);
-            
             if (horizontalDistance > 50f)
             {
                 Debug.LogWarning($"Landing spot too far horizontally: {horizontalDistance}m. Limiting distance.");
@@ -559,8 +539,6 @@ public class DroneController : MonoBehaviour
                 targetHorizontal = currentHorizontal + direction * 50f;
                 _targetPosition = new Vector3(targetHorizontal.x, _targetPosition.y, targetHorizontal.y);
             }
-            
-            // Ensure we don't go below floor level
             if (_targetPosition.y < 0.1f)
             {
                 _targetPosition.y = 0.1f;
@@ -568,14 +546,10 @@ public class DroneController : MonoBehaviour
         }
         catch (System.Exception ex)
         {
-            // Fallback in case of any conversion error
             Debug.LogError($"Error setting landing target: {ex.Message}. Using safe position.");
             _targetPosition = new Vector3(currentPos.x, 0.1f, currentPos.z);
         }
-        
-        // Set appropriate smooth time for landing speed
-        _positionSmoothTime = 1.0f / _landingDescentSpeed;
-        
+        _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Abs(currentPos.y - _targetPosition.y) / _landingDescentSpeed);
         // Start with rotors spinning
         _rotorsSpinning = true;
         
@@ -596,13 +570,10 @@ public class DroneController : MonoBehaviour
 
     private void EnterLandAbort()
     {
-        // Calculate target hover position (in local space)
         Vector3 currentPos = _droneOffset.localPosition;
         _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
+        _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Abs(currentPos.y - _hoverHeight) / _hoverMovementSpeed);
         Debug.Log($"DRONE_Y_DEBUG: EnterLandAbort | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2} (hoverHeight={_hoverHeight:F2})");
-        
-        // Set appropriate smooth time for abort speed (faster than landing)
-        _positionSmoothTime = 0.7f / _landingDescentSpeed;
         
         // Keep rotors spinning during abort
         _rotorsSpinning = true;
@@ -623,13 +594,10 @@ public class DroneController : MonoBehaviour
 
     private void EnterAbort()
     {
-        // Calculate target abort position (high above current position)
         Vector3 currentPos = _droneOffset.localPosition;
         _targetPosition = new Vector3(currentPos.x, _abortClimbHeight, currentPos.z);
+        _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Abs(currentPos.y - _abortClimbHeight) / _maxAbortSpeed);
         Debug.Log($"DRONE_Y_DEBUG: EnterAbort | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2} (abortClimbHeight={_abortClimbHeight:F2})");
-        
-        // Set appropriate smooth time for abort speed (faster ascent)
-        _positionSmoothTime = 0.5f / _cruiseSpeed;
         
         // Keep rotors spinning during abort
         _rotorsSpinning = true;
@@ -873,11 +841,6 @@ public class DroneController : MonoBehaviour
             Debug.LogWarning($"Landing spot Y value is too low ({spot.y}), adjusting to prevent floor penetration");
             spot.y = 0.1f;
         }
-        else if (spot.y > 1.0f)
-        {
-            Debug.LogWarning($"Landing spot Y value is too high ({spot.y}), adjusting to reasonable height");
-            spot.y = 1.0f;
-        }
         
         // Store the landing spot for use in the landing state
         _landingSpot = spot;
@@ -949,7 +912,7 @@ public class DroneController : MonoBehaviour
         _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
         
         // Use consistent smooth time for all hover transitions
-        _positionSmoothTime = 1.0f;
+        _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Abs(currentPos.y - _hoverHeight) / _hoverMovementSpeed);
         
         // Set flag to indicate we're calling from ReturnToHover
         _calledFromReturnToHover = true;

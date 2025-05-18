@@ -31756,11 +31756,19 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 2636591311930403196, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _showArrivalGizmo
-      value: 1
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 2636591311930403196, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
+      propertyPath: _closeSpeedThreshold
+      value: 0.2
       objectReference: {fileID: 0}
     - target: {fileID: 2636591311930403196, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _arrivalSpeedThreshold
-      value: 0.3
+      value: 0.2
+      objectReference: {fileID: 0}
+    - target: {fileID: 2636591311930403196, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
+      propertyPath: _closeDistanceThreshold
+      value: 0.1
       objectReference: {fileID: 0}
     - target: {fileID: 5855772902285522494, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: m_LocalPosition.x
@@ -31812,11 +31820,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _maxAbortSpeed
-      value: 0.82
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _maxHoverSpeed
-      value: 0.29
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _c0AbortTimeout
@@ -31824,11 +31832,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _maxCruiseSpeed
-      value: 0.24
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _maxLandingSpeed
-      value: 0.16
+      value: 2
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _abortClimbHeight
@@ -31836,15 +31844,31 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _accelerationTime
-      value: 2
+      value: 1.2
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _decelerationTime
-      value: 1
+      value: 0.5
+      objectReference: {fileID: 0}
+    - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
+      propertyPath: _postAbortWaitTime
+      value: 3
+      objectReference: {fileID: 0}
+    - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
+      propertyPath: _postHoverWaitTime
+      value: 3
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _minHeightBeforeAbort
-      value: 0.2
+      value: 0.8
+      objectReference: {fileID: 0}
+    - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
+      propertyPath: _preUncertaintyWaitTime
+      value: 3
+      objectReference: {fileID: 0}
+    - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
+      propertyPath: _postUncertaintyWaitTime
+      value: 3
       objectReference: {fileID: 0}
     - target: {fileID: 9134481803310795046, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: GlobalObjectIdHash

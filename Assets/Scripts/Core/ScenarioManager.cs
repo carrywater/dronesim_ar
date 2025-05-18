@@ -59,8 +59,8 @@ public class ScenarioManager : MonoBehaviour
     [SerializeField] private float _hoverHeight = 6f;
 
     [Header("Safety Settings")]
-    [Tooltip("Minimum height before abort (as percentage of hover height, 0.3 = 30% of hover height)")]
-    [Range(0.2f, 0.8f)]
+    [Tooltip("Minimum height before abort (as percentage of hover height, 0.2 = 20% of hover height, 1.0 = 100% of hover height)")]
+    [Range(0.2f, 1.0f)]
     [SerializeField] private float _minHeightBeforeAbort = 0.3f;
 
     [Header("Action Timing")]
@@ -186,7 +186,22 @@ public class ScenarioManager : MonoBehaviour
     {
         // Initialize the drone with flight settings
         InitializeDrone();
-        
+        // Instantly set drone to abort height before scenario starts
+        if (_drone != null)
+        {
+            float abortHeight = _hoverHeight * _minHeightBeforeAbort;
+            Vector3 pos = _drone.transform.position;
+            pos.y = abortHeight;
+            _drone.transform.position = pos;
+            if (_drone.transform.childCount > 0)
+            {
+                // Also set the offset if needed
+                Transform offset = _drone.transform.GetChild(0);
+                Vector3 offsetPos = offset.localPosition;
+                offsetPos.y = abortHeight;
+                offset.localPosition = offsetPos;
+            }
+        }
         // Start the selected scenario after a short delay
         StartCoroutine(DelayedScenarioStart(0.5f));
     }
@@ -239,7 +254,11 @@ public class ScenarioManager : MonoBehaviour
                 _maxHoverSpeed,
                 _maxCruiseSpeed,
                 _abortClimbHeight,
-                _maxLandingSpeed
+                _maxLandingSpeed,
+                _accelerationTime,
+                _decelerationTime,
+                _minSmoothTime,
+                _maxAbortSpeed
             );
             _droneInitialized = true;
             Debug.Log("Drone initialized with flight settings");
@@ -283,7 +302,17 @@ public class ScenarioManager : MonoBehaviour
         _drone.EnablePositionDebugging(true);
         
         // Reset hover height to ensure consistency with initialization value
-        _drone.Initialize(_hoverHeight, _maxHoverSpeed, _maxCruiseSpeed, _abortClimbHeight, _maxLandingSpeed);
+        _drone.Initialize(
+            _hoverHeight,
+            _maxHoverSpeed,
+            _maxCruiseSpeed,
+            _abortClimbHeight,
+            _maxLandingSpeed,
+            _accelerationTime,
+            _decelerationTime,
+            _minSmoothTime,
+            _maxAbortSpeed
+        );
         
         // Wait a short delay before changing states to ensure everything is settled
         StartCoroutine(DelayedHoverReturn(0.3f));
@@ -597,8 +626,7 @@ public class ScenarioManager : MonoBehaviour
         // Make sure tracking is enabled after a delay to ensure drone is stabilized
         yield return new WaitForSeconds(0.5f);
 
-        
-        // Wait for hover height to be reached
+        // Wait for hover height to be reached with proper acceleration
         Debug.Log($"C0: Waiting {_c0InitialHoverTime}s in initial hover before starting assessment");
         yield return new WaitForSeconds(_c0InitialHoverTime - 0.5f);
         
@@ -653,8 +681,9 @@ public class ScenarioManager : MonoBehaviour
             Debug.Log($"C0: Starting landing attempt {i + 1}/{attemptCount}");
             
             // Force the drone back to hover state before starting cruise
+            // This will use proper acceleration/deceleration based on distance
             _drone.ReturnToHover();
-            yield return new WaitForSeconds(0.7f);
+            yield return new WaitForSeconds(_decelerationTime + 0.2f); // Wait for deceleration to complete
             
             // Randomize cruise location for the demonstration
             Vector3 navPoint = _interactionManager.RandomizeC0Position();
@@ -663,10 +692,10 @@ public class ScenarioManager : MonoBehaviour
             // Disable scanning during cruise for more stable movement
             _drone.EnableScanning(false);
             
-            // Move to the randomized location
+            // Move to the randomized location with proper acceleration
             _drone.StartCruiseTo(navPoint);
             
-            // Wait for cruise to complete
+            // Wait for cruise to complete with proper acceleration/deceleration
             float cruiseTimer = 0f;
             float maxCruiseTime = _c0CruiseTime * 3f; // Triple the expected time as safety margin
             bool reachedDestination = false;
@@ -692,13 +721,13 @@ public class ScenarioManager : MonoBehaviour
             {
                 Debug.LogWarning("C0: Cruise to position took too long, forcing hover state");
                 _drone.ReturnToHover();
-                yield return new WaitForSeconds(0.7f);
+                yield return new WaitForSeconds(_decelerationTime + 0.2f); // Wait for deceleration
             }
             
             Debug.Log("C0: Arrived at new position");
             
             // Wait for the drone to stabilize
-            yield return new WaitForSeconds(0.3f);
+            yield return new WaitForSeconds(_decelerationTime + 0.1f);
             
             // Re-enable scanning for hovering behavior
             _drone.EnableScanning(true);
@@ -725,14 +754,19 @@ public class ScenarioManager : MonoBehaviour
             
             // Attempt to land but stop at the abort height
             Vector3 landingSpot = _interactionManager.GetC0TargetPosition();
-            // Ensure landing spot is at ground level, then add abort height
-            landingSpot.y = 0f + _c0AbortHeight;
-            Debug.Log($"C0: Beginning landing assessment, will stop at {_c0AbortHeight}m above ground");
+            // Calculate abort height as a percentage of hover height
+            float abortHeight = _hoverHeight * _minHeightBeforeAbort;
+            landingSpot.y = abortHeight;
+            Debug.Log($"C0: Beginning landing assessment, will stop at {abortHeight:F2}m above ground (minHeightBeforeAbort={_minHeightBeforeAbort:P0} of hover height {_hoverHeight:F2}m)");
             _drone.BeginLanding(landingSpot);
             
-            // Wait during landing descent
-            Debug.Log($"C0: Waiting {_c0LandingWaitTime}s during landing assessment");
-            yield return new WaitForSeconds(2f);
+            // Wait for landing descent to complete and stabilize
+            Debug.Log($"C0: Waiting for landing descent to complete and stabilize");
+            yield return new WaitForSeconds(_decelerationTime + 0.2f);
+            
+            // Wait the configured time before showing uncertainty
+            Debug.Log($"C0: Waiting {_preUncertaintyWaitTime}s before showing uncertainty");
+            yield return new WaitForSeconds(_preUncertaintyWaitTime);
             
             // C0 always shows uncertainty and aborts - this is simplified compared to original
             // No confidence calculation needed - just display a simulated low confidence value
@@ -750,18 +784,23 @@ public class ScenarioManager : MonoBehaviour
                 }
             }
             
+            // Ensure drone is stable before showing uncertainty
+            _drone.EnableScanning(false);
+            yield return new WaitForSeconds(0.2f);
+            
             // Signal uncertainty with the uncertainty animation using low confidence sound
             Debug.Log("C0: Signaling uncertainty about landing spot");
             _hmi.SetStatus(DroneHMI.HMIState.Uncertain);
             
             // Wait during uncertainty signaling
-            yield return new WaitForSeconds(2f);
+            Debug.Log($"C0: Waiting {_postUncertaintyWaitTime}s during uncertainty signaling");
+            yield return new WaitForSeconds(_postUncertaintyWaitTime);
             
             // Raise back up to hover height (abort this landing attempt)
             Debug.Log("C0: Aborting landing attempt");
             _drone.LandAbort();
             
-            // Wait for abort to complete with timeout
+            // Wait for abort to complete with proper acceleration
             float abortTimer = 0f;
             float maxAbortTime = 5f;
             bool abortComplete = false;
@@ -785,19 +824,15 @@ public class ScenarioManager : MonoBehaviour
             {
                 Debug.LogWarning("C0: Landing abort took too long, forcing hover state");
                 _drone.ReturnToHover();
-                yield return new WaitForSeconds(0.7f);
+                yield return new WaitForSeconds(_decelerationTime + 0.2f); // Wait for deceleration
             }
             
-            Debug.Log($"C0: Post-abort hovering for a moment");
-            yield return new WaitForSeconds(_c0PostAbortHoverTime);
+            // Wait after abort before next action
+            Debug.Log($"C0: Waiting {_postAbortWaitTime}s after abort before next action");
+            yield return new WaitForSeconds(_postAbortWaitTime);
             
             // Reset HMI state after uncertainty
             _hmi.SetStatus(DroneHMI.HMIState.Idle);
-            
-            // Make sure tracking stays active after abort
-        
-            
-            Debug.Log($"C0: Completed landing attempt {i + 1}/{attemptCount}");
         }
 
         Debug.Log("C0: All landing attempts completed, preparing for final abort");
@@ -824,6 +859,7 @@ public class ScenarioManager : MonoBehaviour
         yield return new WaitForSeconds(_c0LandingWaitTime);
         
         // Abort mission (rise up while keeping rotors on)
+        // This will use proper acceleration based on distance
         Debug.Log("C0: Performing final abort");
         _drone.Abort();
         
