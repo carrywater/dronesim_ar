@@ -186,22 +186,7 @@ public class ScenarioManager : MonoBehaviour
     {
         // Initialize the drone with flight settings
         InitializeDrone();
-        // Instantly set drone to abort height before scenario starts
-        if (_drone != null)
-        {
-            float abortHeight = _hoverHeight * _minHeightBeforeAbort;
-            Vector3 pos = _drone.transform.position;
-            pos.y = abortHeight;
-            _drone.transform.position = pos;
-            if (_drone.transform.childCount > 0)
-            {
-                // Also set the offset if needed
-                Transform offset = _drone.transform.GetChild(0);
-                Vector3 offsetPos = offset.localPosition;
-                offsetPos.y = abortHeight;
-                offset.localPosition = offsetPos;
-            }
-        }
+        
         // Start the selected scenario after a short delay
         StartCoroutine(DelayedScenarioStart(0.5f));
     }
@@ -278,9 +263,8 @@ public class ScenarioManager : MonoBehaviour
         
         if (_droneInitialized)
         {
-            // Start the drone in hover state
+            // Only call state transition methods, do not set position directly
             _drone.StartInHoverState();
-            
             // Then start the scenario
             StartScenario();
         }
@@ -339,6 +323,19 @@ public class ScenarioManager : MonoBehaviour
         
         // If the drone is in an abort or landing state, return it to hover
         _drone.ReturnToHover();
+        
+        // Wait for drone to stabilize at hover height
+        float hoverTimeout = 5f;
+        float hoverElapsed = 0f;
+        while (!_drone.IsAtTargetY() && hoverElapsed < hoverTimeout)
+        {
+            hoverElapsed += Time.deltaTime;
+            yield return null;
+        }
+        if (!_drone.IsAtTargetY())
+        {
+            Debug.LogWarning("ScenarioManager: Drone did not reach hover height in time before next step");
+        }
         
         // Add a longer delay before extending legs to allow hover transition to fully stabilize
         yield return new WaitForSeconds(0.8f); // Increased from 0.3f
@@ -681,9 +678,19 @@ public class ScenarioManager : MonoBehaviour
             Debug.Log($"C0: Starting landing attempt {i + 1}/{attemptCount}");
             
             // Force the drone back to hover state before starting cruise
-            // This will use proper acceleration/deceleration based on distance
             _drone.ReturnToHover();
-            yield return new WaitForSeconds(_decelerationTime + 0.2f); // Wait for deceleration to complete
+            // Wait for drone to stabilize at hover height
+            float hoverTimeout = 5f;
+            float hoverElapsed = 0f;
+            while (!_drone.IsAtTargetY() && hoverElapsed < hoverTimeout)
+            {
+                hoverElapsed += Time.deltaTime;
+                yield return null;
+            }
+            if (!_drone.IsAtTargetY())
+            {
+                Debug.LogWarning("ScenarioManager: Drone did not reach hover height in time before next step");
+            }
             
             // Randomize cruise location for the demonstration
             Vector3 navPoint = _interactionManager.RandomizeC0Position();

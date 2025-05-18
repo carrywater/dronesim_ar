@@ -142,7 +142,7 @@ public class DroneController : MonoBehaviour
     
     // Movement state tracking
     private bool _isAscendingHover = false;     // Whether currently moving to hover height
-    private bool _isInTransition = false;       // Whether currently in a movement transition
+    private bool _isInTransition = false;       // Only allow one transition at a time
     private float _movementProgress = 0f;       // Progress along movement curve (legacy)
     
     // Flag to track if we're calling from ReturnToHover to avoid duplicating position preservation
@@ -156,6 +156,13 @@ public class DroneController : MonoBehaviour
     private float _decelerationTime = 0.8f;
     private float _minSmoothTime = 0.5f;
     private float _maxAbortSpeed = 4f;
+    
+    // Add a consistent smoothing parameter for all transitions
+    [SerializeField] private float _verticalTransitionSmoothTime = 0.7f; // Exposed in Inspector for tuning
+    
+    #if UNITY_EDITOR
+    private Vector3 _lastSetPosition;
+    #endif
     
     #endregion
     
@@ -185,6 +192,9 @@ public class DroneController : MonoBehaviour
         if (_droneOffset != null)
         {
             _droneOffset.localPosition = Vector3.zero;
+#if UNITY_EDITOR
+            _lastSetPosition = _droneOffset.localPosition;
+#endif
         }
         
         // Log if multiple drones detected (debugging)
@@ -240,11 +250,14 @@ public class DroneController : MonoBehaviour
             Debug.LogError("Cannot start drone hover - drone not initialized! Call Initialize first.");
             return;
         }
+        
         // Initialize target position at hover height
         Vector3 currentPos = _droneOffset.localPosition;
         _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
-        // Use Inspector parameter for initial hover smoothing
+        
+        // Use a smoother transition for initial hover
         _positionSmoothTime = _minSmoothTime;
+        
         // Transition to hover state
         TransitionToState(FlightState.Hover);
     }
@@ -302,23 +315,54 @@ public class DroneController : MonoBehaviour
     /// </summary>
     private void UpdateUnifiedPosition()
     {
-        // Skip if position is locked during critical transitions
         if (_positionLocked) return;
-        
-        // Safety check for extreme velocity values
+        float dist = Vector3.Distance(_droneOffset.localPosition, _targetPosition);
+        if (dist > 2.0f)
+        {
+            Debug.LogWarning($"DRONE_SANITY: Drone position far from target! localY={_droneOffset.localPosition.y:F2}, targetY={_targetPosition.y:F2}, dist={dist:F2}");
+        }
         if (_currentVelocity.magnitude > 20f)
         {
             Debug.LogWarning($"Extreme velocity detected: {_currentVelocity.magnitude}! Clamping velocity.");
             _currentVelocity = Vector3.ClampMagnitude(_currentVelocity, 20f);
         }
-        
-        // Use SmoothDamp for all position changes - smoother than Lerp
-        _droneOffset.localPosition = Vector3.SmoothDamp(
+#if UNITY_EDITOR
+        if (_droneOffset.localPosition != _lastSetPosition)
+        {
+            var stack = new System.Diagnostics.StackTrace();
+            string caller = stack.GetFrame(1).GetMethod().Name;
+            if (caller != nameof(UpdateUnifiedPosition) && caller != nameof(Awake))
+            {
+                Debug.LogWarning($"DRONE_SANITY: _droneOffset.localPosition was set outside of UpdateUnifiedPosition or Awake! Called from: {caller}");
+            }
+            _lastSetPosition = _droneOffset.localPosition;
+        }
+#endif
+        // SmoothDamp for all position changes
+        Vector3 newPos = Vector3.SmoothDamp(
             _droneOffset.localPosition, 
             _targetPosition, 
             ref _currentVelocity, 
             _positionSmoothTime
         );
+        // Clamp Y during landing and abort
+        if (_state == FlightState.Landing)
+        {
+            if (newPos.y < _targetPosition.y)
+            {
+                Debug.LogWarning($"DRONE_CLAMP: Prevented drone from falling below landing/abort height. AttemptedY={newPos.y:F2}, ClampY={_targetPosition.y:F2}");
+                newPos.y = _targetPosition.y;
+            }
+        }
+        if (_state == FlightState.LandAbort)
+        {
+            if (newPos.y > _hoverHeight)
+            {
+                Debug.LogWarning($"DRONE_CLAMP: Prevented drone from rising above hover height during abort. AttemptedY={newPos.y:F2}, ClampY={_hoverHeight:F2}");
+                newPos.y = _hoverHeight;
+            }
+        }
+        _droneOffset.localPosition = newPos;
     }
 
     /// <summary>
@@ -351,34 +395,28 @@ public class DroneController : MonoBehaviour
     /// <summary>
     /// Transition to a new flight state
     /// </summary>
-    private void TransitionToState(FlightState newState)
+    public void ForceTransitionToState(FlightState newState)
     {
-        // Skip if already in this state
-        if (_state == newState) return;
-        
-        // Lock position during state transition to prevent jumps
+        Debug.Log($"DRONE_STATE_DEBUG: ForceTransitionToState called: {_state} -> {newState}");
+        _isInTransition = false; // Allow forced transition
+        TransitionToState(newState, true);
+    }
+
+    private void TransitionToState(FlightState newState, bool force = false)
+    {
+        Debug.Log($"DRONE_STATE_DEBUG: TransitionToState called: {_state} -> {newState} | _isInTransition={_isInTransition} | force={force}");
+        if (_isInTransition && !force) return;
+        _isInTransition = true;
         _positionLocked = true;
-        
-        // Store current position before state change - crucial for smooth transitions
         Vector3 currentPos = _droneOffset.localPosition;
-        
-        // Set _targetPosition to current position initially
-        // This ensures no immediate position change when unlocking
         _targetPosition = currentPos;
-        
-        // Exit logic for old state
         switch (_state)
         {
             case FlightState.CruiseToTarget:
                 _navigation.OnArrived -= OnCruiseArrived;
                 break;
         }
-
-        // Store old and new state
-        FlightState previousState = _state;
         _state = newState;
-
-        // Auto-disable scanning for precision states
         switch (newState)
         {
             case FlightState.Landing:
@@ -388,43 +426,49 @@ public class DroneController : MonoBehaviour
                 _enableScanning = false;
                 break;
         }
-        
-        // Notify listeners of state change
         OnStateChanged?.Invoke(newState);
-        
-        // Entry logic for new state - call the appropriate Enter method first
         switch (_state)
         {
             case FlightState.Idle:
                 EnterIdle();
                 break;
-                
             case FlightState.Hover:
                 EnterHover();
                 break;
-                
             case FlightState.CruiseToTarget:
                 EnterCruise();
                 break;
-                
             case FlightState.Landing:
                 EnterLanding();
                 break;
-                
             case FlightState.LandAbort:
                 EnterLandAbort();
                 break;
-                
             case FlightState.Abort:
                 EnterAbort();
                 break;
         }
-        
-        // Reset flag after state change
         _calledFromReturnToHover = false;
-        
-        // Unlock position to allow smooth movement to new target
         _positionLocked = false;
+        StartCoroutine(MonitorTransitionCompletion(newState));
+    }
+    
+    private IEnumerator MonitorTransitionCompletion(FlightState state)
+    {
+        float targetY = _targetPosition.y;
+        float timeout = 5f; // 5 seconds max wait
+        float elapsed = 0f;
+        while (Mathf.Abs(_droneOffset.localPosition.y - targetY) > 0.05f && elapsed < timeout)
+        {
+            yield return null;
+            elapsed += Time.deltaTime;
+        }
+        if (elapsed >= timeout)
+        {
+            Debug.LogWarning($"DRONE_STATE_DEBUG: MonitorTransitionCompletion timed out for state {state}. Forcing _isInTransition=false");
+        }
+        _isInTransition = false;
+        Debug.Log($"DRONE_STATE_DEBUG: Transition to {state} complete. localY={_droneOffset.localPosition.y:F2}, targetY={targetY:F2}");
     }
     
     #endregion
@@ -448,21 +492,14 @@ public class DroneController : MonoBehaviour
     {
         Vector3 currentPos = _droneOffset.localPosition;
         _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
-        _positionSmoothTime = _minSmoothTime;
+        _positionSmoothTime = _verticalTransitionSmoothTime;
         Debug.Log($"DRONE_Y_DEBUG: EnterHover | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2} (hoverHeight={_hoverHeight:F2})");
-        // Start motors and PID sway
         _rotorsSpinning = true;
-        
-        // Temporarily disable PID controller until height is reached
         StartCoroutine(DelayedPIDEnable());
-        
-        // Start propeller sounds if HMI is available
         if (_hmi != null)
         {
             _hmi.PlayHoverHum();
         }
-        
-        // Set flag to indicate we're adjusting hover height
         _isAscendingHover = true;
     }
 
@@ -537,7 +574,7 @@ public class DroneController : MonoBehaviour
                 Debug.LogWarning($"Landing spot too far horizontally: {horizontalDistance}m. Limiting distance.");
                 Vector2 direction = (targetHorizontal - currentHorizontal).normalized;
                 targetHorizontal = currentHorizontal + direction * 50f;
-                _targetPosition = new Vector3(targetHorizontal.x, _targetPosition.y, targetHorizontal.y);
+                _targetPosition = new Vector3(targetHorizontal.x, _landingSpot.y, targetHorizontal.y);
             }
             if (_targetPosition.y < 0.1f)
             {
@@ -550,20 +587,15 @@ public class DroneController : MonoBehaviour
             _targetPosition = new Vector3(currentPos.x, 0.1f, currentPos.z);
         }
         _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Abs(currentPos.y - _targetPosition.y) / _landingDescentSpeed);
-        // Start with rotors spinning
         _rotorsSpinning = true;
-        
-        // PID controller should be disabled during landing
         if (_pidController != null)
         {
             _pidController.enabled = false;
         }
-        
-        // Set lower propeller pitch for landing
         if (_hmi != null)
         {
-            _hmi.SetPropellerPitch(0.9f); // Lower pitch for descent
-            _hmi.PlayLandingSignal(); // Start landing beep signal
+            _hmi.SetPropellerPitch(0.9f);
+            _hmi.PlayLandingSignal();
         }
         Debug.Log($"DRONE_Y_DEBUG: EnterLanding | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2}");
     }
@@ -572,47 +604,36 @@ public class DroneController : MonoBehaviour
     {
         Vector3 currentPos = _droneOffset.localPosition;
         _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
-        _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Abs(currentPos.y - _hoverHeight) / _hoverMovementSpeed);
+        _positionSmoothTime = _verticalTransitionSmoothTime;
         Debug.Log($"DRONE_Y_DEBUG: EnterLandAbort | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2} (hoverHeight={_hoverHeight:F2})");
-        
-        // Keep rotors spinning during abort
         _rotorsSpinning = true;
-        
-        // Disable PID during transition
         if (_pidController != null)
         {
             _pidController.enabled = false;
         }
-        
-        // Higher pitch for abort ascent
         if (_hmi != null)
         {
-            _hmi.SetPropellerPitch(1.2f); // Higher pitch for quick ascent
-            _hmi.StopLandingSignal(); // Stop landing beep signal if active
+            _hmi.SetPropellerPitch(1.2f);
+            _hmi.StopLandingSignal();
         }
+        _isInTransition = false;
     }
 
     private void EnterAbort()
     {
         Vector3 currentPos = _droneOffset.localPosition;
         _targetPosition = new Vector3(currentPos.x, _abortClimbHeight, currentPos.z);
-        _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Abs(currentPos.y - _abortClimbHeight) / _maxAbortSpeed);
+        _positionSmoothTime = _verticalTransitionSmoothTime;
         Debug.Log($"DRONE_Y_DEBUG: EnterAbort | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2} (abortClimbHeight={_abortClimbHeight:F2})");
-        
-        // Keep rotors spinning during abort
         _rotorsSpinning = true;
-        
-        // Disable PID during abort
         if (_pidController != null)
         {
             _pidController.enabled = false;
         }
-        
-        // Maximum pitch for emergency abort
         if (_hmi != null)
         {
-            _hmi.SetPropellerPitch(1.5f); // Maximum pitch for rapid emergency ascent
-            _hmi.StopLandingSignal(); // Stop landing beep signal if active
+            _hmi.SetPropellerPitch(1.5f);
+            _hmi.StopLandingSignal();
         }
     }
     
@@ -686,61 +707,47 @@ public class DroneController : MonoBehaviour
 
     private void UpdateLandingState()
     {
-        float distanceToLanding = Vector3.Distance(_droneOffset.localPosition, _targetPosition);
-        
-        // Update propeller sound and volume based on landing progress
+        float distanceToLanding = Mathf.Abs(_droneOffset.localPosition.y - _targetPosition.y);
         if (_hmi != null)
         {
-            // Calculate how close we are to landing (0 = start, 1 = landed)
             float landingProgress = 1f - Mathf.Clamp01(distanceToLanding / 2f);
-            
-            // Reduce pitch as we get closer to ground
             float pitchValue = Mathf.Lerp(0.9f, 0.7f, landingProgress);
             _hmi.SetPropellerPitch(pitchValue);
-            
-            // Reduce volume in final approach
             if (landingProgress > 0.8f)
             {
-                // Begin fading out volume in final 20% of landing
-                float volumeFactor = Mathf.Clamp01((1f - landingProgress) * 5f); // Map 0.8-1.0 to 1.0-0.0
+                float volumeFactor = Mathf.Clamp01((1f - landingProgress) * 5f);
                 _hmi.SetPropellerVolume(volumeFactor);
             }
         }
-        
-        // Check if we've reached the landing spot
-        if (distanceToLanding < 0.1f)
+        // Only allow transition to LandAbort when within 0.1m of target
+        if (_state == FlightState.Landing && distanceToLanding < 0.1f)
         {
-            // Transition to idle when we've landed
-            TransitionToState(FlightState.Idle);
+            // Ready for abort or next state
         }
     }
 
     private void UpdateLandAbortState()
     {
-        // Calculate distance to hover height
         float distanceToHover = Mathf.Abs(_droneOffset.localPosition.y - _hoverHeight);
-        
-        // Update propeller sound based on abort progress
+        Debug.Log($"DRONE_Y_DEBUG: UpdateLandAbortState | localY={_droneOffset.localPosition.y:F2} targetY={_hoverHeight:F2} dist={distanceToHover:F2}");
         if (_hmi != null)
         {
-            // Calculate abort progress (0 = start, 1 = reached hover)
             float abortProgress = 1f - Mathf.Clamp01(distanceToHover / 2f);
-            
-            // Start at high pitch (emergency) and gradually return to normal
             float pitchValue = Mathf.Lerp(1.4f, 1.1f, abortProgress);
             _hmi.SetPropellerPitch(pitchValue);
-            
-            // Boost volume during abort
             _hmi.SetPropellerVolume(1.2f);
         }
-        
-        // Check if we've reached hover height
+        if (_currentVelocity.y < 0.01f && distanceToHover > 0.1f)
+        {
+            Vector3 currentPos = _droneOffset.localPosition;
+            _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
+            _positionSmoothTime = _verticalTransitionSmoothTime;
+            Debug.LogWarning($"DRONE_Y_DEBUG: Forcing upward movement in LandAbort. localY={currentPos.y:F2} -> targetY={_hoverHeight:F2}");
+        }
         if (distanceToHover < 0.1f)
         {
-            // Transition back to hover state
-            TransitionToState(FlightState.Hover);
-            
-            // Reset to normal volume
+            Debug.Log($"DRONE_Y_DEBUG: LandAbort complete. Transitioning to Hover.");
+            ForceTransitionToState(FlightState.Hover);
             if (_hmi != null)
             {
                 _hmi.SetPropellerVolume(1.0f);
@@ -832,7 +839,7 @@ public class DroneController : MonoBehaviour
             Debug.LogWarning($"Landing spot too far: {spot}, distance: {Vector2.Distance(targetHorizontal, currentHorizontal)}. Limiting distance.");
             Vector2 direction = (targetHorizontal - currentHorizontal).normalized;
             targetHorizontal = currentHorizontal + direction * maxAllowedDistance;
-            spot = new Vector3(targetHorizontal.x, spot.y, targetHorizontal.y);
+            _targetPosition = new Vector3(targetHorizontal.x, _landingSpot.y, targetHorizontal.y);
         }
         
         // Ensure landing spot has reasonable Y value
@@ -852,7 +859,7 @@ public class DroneController : MonoBehaviour
         }
         
         // Use a slightly longer smooth time for landing to prevent sudden movements
-        _positionSmoothTime = 1.2f / _landingDescentSpeed;
+        _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Max(_minSmoothTime, 1.2f / _landingDescentSpeed));
         
         // Transition to landing state
         TransitionToState(FlightState.Landing);
@@ -902,28 +909,14 @@ public class DroneController : MonoBehaviour
             Debug.LogError("Cannot return to hover - drone not initialized!");
             return;
         }
-        
-        // Lock position during transition to prevent jumps
+        if (_isInTransition) return;
         _positionLocked = true;
-        
         Vector3 currentPos = _droneOffset.localPosition;
-        
-        // Set target position maintaining X and Z but targeting hover height
         _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
-        
-        // Use consistent smooth time for all hover transitions
-        _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Abs(currentPos.y - _hoverHeight) / _hoverMovementSpeed);
-        
-        // Set flag to indicate we're calling from ReturnToHover
+        _positionSmoothTime = _verticalTransitionSmoothTime;
         _calledFromReturnToHover = true;
-        
-        // Transition to hover state - this will preserve position
         TransitionToState(FlightState.Hover);
-        
-        // Set ascending flag to track completion
         _isAscendingHover = true;
-        
-        // Unlock position to allow smooth transition
         _positionLocked = false;
     }
 
@@ -1408,6 +1401,12 @@ public class DroneController : MonoBehaviour
             targetRotation,
             _hmdTrackingSpeed * Time.deltaTime
         );
+    }
+    
+    // Returns true if the drone is at its target Y within a threshold
+    public bool IsAtTargetY(float threshold = 0.1f)
+    {
+        return Mathf.Abs(_droneOffset.localPosition.y - _targetPosition.y) < threshold;
     }
     
     #endregion

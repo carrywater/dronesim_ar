@@ -31816,7 +31816,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _hoverHeight
-      value: 6
+      value: 5
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _maxAbortSpeed
@@ -31824,7 +31824,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _maxHoverSpeed
-      value: 2
+      value: 0.8
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _c0AbortTimeout
@@ -31832,11 +31832,11 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _maxCruiseSpeed
-      value: 2
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _maxLandingSpeed
-      value: 2
+      value: 0.8
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _abortClimbHeight
@@ -31852,23 +31852,23 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _postAbortWaitTime
-      value: 3
+      value: 1.5
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _postHoverWaitTime
-      value: 3
+      value: 1.5
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _minHeightBeforeAbort
-      value: 0.8
+      value: 0.95
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _preUncertaintyWaitTime
-      value: 3
+      value: 1.5
       objectReference: {fileID: 0}
     - target: {fileID: 8765126535259520411, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: _postUncertaintyWaitTime
-      value: 3
+      value: 1.5
       objectReference: {fileID: 0}
     - target: {fileID: 9134481803310795046, guid: 30834de70f1265240a1579ac964ea3f2, type: 3}
       propertyPath: GlobalObjectIdHash
