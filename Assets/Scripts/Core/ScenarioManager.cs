@@ -103,6 +103,22 @@ public class ScenarioManager : MonoBehaviour
     [Tooltip("Maximum wait time (seconds) for user guidance")]
     [SerializeField] private float _c2MaxWaitTime = 45f;
     
+    [Header("C1 Settings")]
+    [Tooltip("Maximum number of landing attempts before aborting")]
+    [SerializeField] private int _c1MaxAttempts = 3;
+
+    [Tooltip("Time to wait after reaching hover height before showing uncertainty (seconds)")]
+    [Range(0.5f, 3f)]
+    [SerializeField] private float _c1PreUncertaintyWaitTime = 1f;
+
+    [Tooltip("Time to wait after uncertainty before showing landing spot (seconds)")]
+    [Range(0.5f, 3f)]
+    [SerializeField] private float _c1PostUncertaintyWaitTime = 1f;
+
+    [Tooltip("Time to wait after landing before next action (seconds)")]
+    [Range(0.5f, 3f)]
+    [SerializeField] private float _c1PostLandingWaitTime = 1f;
+    
     #endregion
     
     #region Hidden Settings - Not Visible in Editor
@@ -323,19 +339,6 @@ public class ScenarioManager : MonoBehaviour
         
         // If the drone is in an abort or landing state, return it to hover
         _drone.ReturnToHover();
-        
-        // Wait for drone to stabilize at hover height
-        float hoverTimeout = 5f;
-        float hoverElapsed = 0f;
-        while (!_drone.IsAtTargetY() && hoverElapsed < hoverTimeout)
-        {
-            hoverElapsed += Time.deltaTime;
-            yield return null;
-        }
-        if (!_drone.IsAtTargetY())
-        {
-            Debug.LogWarning("ScenarioManager: Drone did not reach hover height in time before next step");
-        }
         
         // Add a longer delay before extending legs to allow hover transition to fully stabilize
         yield return new WaitForSeconds(0.8f); // Increased from 0.3f
@@ -678,19 +681,9 @@ public class ScenarioManager : MonoBehaviour
             Debug.Log($"C0: Starting landing attempt {i + 1}/{attemptCount}");
             
             // Force the drone back to hover state before starting cruise
+            // This will use proper acceleration/deceleration based on distance
             _drone.ReturnToHover();
-            // Wait for drone to stabilize at hover height
-            float hoverTimeout = 5f;
-            float hoverElapsed = 0f;
-            while (!_drone.IsAtTargetY() && hoverElapsed < hoverTimeout)
-            {
-                hoverElapsed += Time.deltaTime;
-                yield return null;
-            }
-            if (!_drone.IsAtTargetY())
-            {
-                Debug.LogWarning("ScenarioManager: Drone did not reach hover height in time before next step");
-            }
+            yield return new WaitForSeconds(_decelerationTime + 0.2f); // Wait for deceleration to complete
             
             // Randomize cruise location for the demonstration
             Vector3 navPoint = _interactionManager.RandomizeC0Position();
@@ -891,113 +884,127 @@ public class ScenarioManager : MonoBehaviour
     {
         Debug.Log("Starting C-1 Scenario (Confirm)");
         
-        // Enable scanning behavior for more lifelike movement
-        _drone.EnableScanning(true);
-
- 
-        // Update confidence display
-        if (_confidenceText != null)
+        // 1. Start from abort height
+        _drone.Abort();
+        yield return new WaitForSeconds(_decelerationTime + 0.2f);
+        
+        // 2. Descend to hover height
+        _drone.ReturnToHover();
+        yield return new WaitForSeconds(_decelerationTime + 0.2f);
+        
+        // 3. Signal uncertainty
+        _hmi.SetStatus(DroneHMI.HMIState.Uncertain);
+        yield return new WaitForSeconds(_c1PreUncertaintyWaitTime);
+        
+        // 4. Start landing attempts
+        int attempts = 0;
+        bool landingSuccessful = false;
+        
+        while (attempts < _c1MaxAttempts && !landingSuccessful)
         {
-            _confidenceText.text = "Awaiting User Confirmation";
-            _confidenceText.color = Color.yellow;
-        }
-        
-        // Wait a moment while tracking participant before starting cruise
-        yield return new WaitForSeconds(1.0f);
-        
-        // 1. Move drone to interaction zone
-        // Disable scanning during cruise
-        _drone.EnableScanning(false);
-        
-        Debug.Log("C1: Starting cruise to interaction zone (tracking will be temporarily disabled)");
-        Vector3 interactionPos = _interactionManager.transform.position;
-        interactionPos.y = _drone.transform.position.y; // Keep same height
-        _drone.StartCruiseTo(interactionPos);
-        
-        // Wait for cruise time with a short additional buffer
-        yield return new WaitForSeconds(_c1CruiseTime + 0.5f);
-        
-        // 2. Re-enable scanning when hovering
-        _drone.EnableScanning(true);
-        
-
-        // Show landing probe and prompt for confirmation
-        // In full implementation, we would call _interactionManager.ShowLandingProbe()
-        _hmi.SetStatus(DroneHMI.HMIState.PromptConfirm);
-        
-        // 3. Wait for confirmation or rejection
-        float elapsedTime = 0f;
-        // Simulate user confirmation after a delay
-        bool userConfirmed = false;
-        
-        // Periodically check tracking status during waiting period
-        while (!userConfirmed && elapsedTime < _c1MaxWaitTime)
-        {
-            elapsedTime += Time.deltaTime;
+            attempts++;
+            Debug.Log($"C1: Starting landing attempt {attempts}/{_c1MaxAttempts}");
             
-           
+            // Randomize target position for this attempt
+            _interactionManager.RandomizeC0Position();
             
-            // After 3 seconds, simulate user confirmation (in real implementation this would come from InteractionManager)
-            if (elapsedTime > 3f && !userConfirmed)
+            // Show UI and spline at the target position
+            _interactionManager.ShowC1Cue();
+            
+            // Wait for user input
+            float elapsedTime = 0f;
+            bool userResponded = false;
+            
+            while (!userResponded && elapsedTime < _c1MaxWaitTime)
             {
-                userConfirmed = true;
+                elapsedTime += Time.deltaTime;
                 
-                Vector3 landingPosition = _drone.transform.position;
-                landingPosition.y = 0f; // Land on ground
+                // Check for user input through InteractionManager events
+                if (_interactionManager.IsC1Completed)
+                {
+                    userResponded = true;
+                    
+                    Debug.Log("C1: User confirmed, beginning landing");
+                    
+                    // Begin landing at the target position
+                    Vector3 landingPosition = _interactionManager.GetC1TargetPosition();
+                    landingPosition.y = 0f; // Land on ground
+                    
+                    // Update HMI for landing before starting the landing sequence
+                    _hmi.SetStatus(DroneHMI.HMIState.Landing);
+                    
+                    // Start landing sequence
+                    _drone.BeginLanding(landingPosition);
+                    
+                    // Wait for landing to complete
+                    while (_drone.CurrentState != DroneController.FlightState.Idle)
+                    {
+                        yield return null;
+                    }
+                    
+                    // Stop landing signal after landing is complete
+                    _hmi.StopLandingSignal();
+                    
+                    landingSuccessful = true;
+                    
+                    // Show success state
+                    _hmi.SetStatus(DroneHMI.HMIState.Success);
+                    yield return new WaitForSeconds(_c1PostLandingWaitTime);
+                }
+                else if (_interactionManager.IsC1Rejected)
+                {
+                    userResponded = true;
+                    
+                    Debug.Log($"C1: User rejected attempt {attempts}/{_c1MaxAttempts}");
+                    
+                    // Hide UI and spline
+                    _interactionManager.HideAllCues();
+                    
+                    // Signal rejection
+                    _hmi.SetStatus(DroneHMI.HMIState.Reject);
+                    yield return new WaitForSeconds(0.5f);
+                    
+                    // If we have more attempts left, prepare for next attempt
+                    if (attempts < _c1MaxAttempts)
+                    {
+                        // Return to hover for next attempt
+                        _drone.ReturnToHover();
+                        yield return new WaitForSeconds(_decelerationTime + 0.2f);
+                        
+                        // Reset interaction state for next attempt
+                        _interactionManager.HideAllInteractions();
+                    }
+                    else
+                    {
+                        Debug.Log("C1: Maximum attempts reached, aborting mission");
+                        _hmi.SetStatus(DroneHMI.HMIState.Abort);
+                        _drone.Abort();
+                    }
+                }
                 
-                Debug.Log("C1: User confirmed, beginning landing");
-                
-                // Begin landing at the confirmed spot
-                _drone.BeginLanding(landingPosition);
-                
-                // Update HMI for landing
-                _hmi.SetStatus(DroneHMI.HMIState.Landing);
-     
-            }
-            
-            yield return null;
-        }
-        
-        // Check if we timed out
-        if (elapsedTime >= _c1MaxWaitTime && !userConfirmed)
-        {
-            // Handle timeout - abort the mission
-            if (_confidenceText != null)
-            {
-                _confidenceText.text = "Confirmation Timeout - Aborting";
-                _confidenceText.color = Color.red;
-            }
-            
-            // Abort
-            _hmi.SetStatus(DroneHMI.HMIState.Abort);
-            _drone.Abort();
-        }
-        else if (userConfirmed)
-        {
-            // Wait for landing to complete (drone will transition to Idle automatically)
-            while (_drone.CurrentState != DroneController.FlightState.Idle)
-            {
                 yield return null;
             }
             
-            // Show success HMI state
-            _hmi.SetStatus(DroneHMI.HMIState.Success);
-            
-            // Update confidence display to show success
-            if (_confidenceText != null)
+            // If we timed out
+            if (!userResponded)
             {
-                _confidenceText.text = "Landing Successful (User Confirmed)";
-                _confidenceText.color = Color.green;
+                Debug.Log("C1: User input timeout");
+                _interactionManager.HideAllCues();
+                _hmi.SetStatus(DroneHMI.HMIState.Reject);
+                yield return new WaitForSeconds(0.5f);
+                
+                // Return to hover
+                _drone.ReturnToHover();
+                yield return new WaitForSeconds(_decelerationTime + 0.2f);
             }
-            
-            // Wait a moment to show success state
-            yield return new WaitForSeconds(2f);
-            
-            // Handle completion (optionally destroy drone)
-            if (_c1DestroyDroneAfterCompletion)
-            {
-                Destroy(_drone.gameObject);
-            }
+        }
+        
+        // If we failed all attempts, abort
+        if (!landingSuccessful)
+        {
+            Debug.Log("C1: All landing attempts failed, aborting mission");
+            _hmi.SetStatus(DroneHMI.HMIState.Abort);
+            _drone.Abort();
         }
         
         Debug.Log("Completed C-1 Scenario");

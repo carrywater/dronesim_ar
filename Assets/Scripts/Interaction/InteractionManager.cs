@@ -1,6 +1,9 @@
 using System;
 using System.Collections;
 using UnityEngine;
+using Oculus.Interaction;
+using UnityEngine.Splines;
+using Visualization;
 
 /// <summary>
 /// Combined manager that handles both AR UI elements and interaction zone logic.
@@ -11,10 +14,13 @@ public class InteractionManager : MonoBehaviour
     [Header("Dependencies")]
     [SerializeField] private ZoneRandomizer _zoneRandomizer;
     [SerializeField] private DroneController _droneController;
+    [SerializeField] private C1GestureHandler _c1GestureHandler;
     
     [Header("AR Cue Objects")]
-    [SerializeField] private GameObject _c1CueObject;  // The c1target/c1CueOffset with thumbs up/down UI
-    [SerializeField] private GameObject _c2CueObject;  // The c2target with guidance UI
+    [Tooltip("Prefab for the C1 confirmation UI (thumbs up/down)")]
+    [SerializeField] private GameObject _c1CuePrefab;
+    [Tooltip("The C2 guidance UI")]
+    [SerializeField] private GameObject _c2CueObject;
     
     [Header("Zone Indices")]
     [Tooltip("Index of the C-0 navigation zone-target pair in the ZoneRandomizer")]
@@ -32,33 +38,80 @@ public class InteractionManager : MonoBehaviour
     [Tooltip("How long the guidance can be active for (seconds), 0 = infinite until user stops")]
     [SerializeField] private float _guidanceMaxTime = 10f;
     
+    [Header("Visualization")]
+    [SerializeField] private SplineContainerVisualizer _splineVisualizer;
+    
+    // Runtime instance of the C1 cue
+    private GameObject _c1CueInstance;
+    private Vector3 _c1TargetPosition;
+    
     // Events that UI elements can trigger
-    public event Action<Vector3> OnConfirm;
-    public event Action OnReject;
+    public event System.Action<Vector3> OnC1Confirmation;
+    public event System.Action OnC1Rejection;
     public event Action<Vector3> OnGuidance;
     
     // Completion flags used by ScenarioManager to transition between scenarios
     public bool IsC1Completed { get; private set; } = false;
     public bool IsC2Completed { get; private set; } = false;
+    public bool IsC1Rejected { get; private set; } = false;
     
     // Scenario coroutines
     private Coroutine _activeCoroutine;
+    private Coroutine _splineUpdateCoroutine;
+    
+    private void Awake()
+    {
+        if (_droneController == null)
+        {
+            _droneController = FindObjectOfType<DroneController>();
+        }
+        
+        if (_splineVisualizer == null)
+        {
+            _splineVisualizer = FindObjectOfType<SplineContainerVisualizer>();
+        }
+        
+        if (_c1GestureHandler == null)
+        {
+            _c1GestureHandler = GetComponentInChildren<C1GestureHandler>();
+        }
+
+        // Ensure C1 cue is deactivated at start
+        if (_c1CuePrefab != null)
+        {
+            _c1CuePrefab.SetActive(false);
+        }
+    }
     
     private void OnEnable()
     {
         HideAllCues();
         
+        // Subscribe to gesture events
+        if (_c1GestureHandler != null)
+        {
+            _c1GestureHandler.OnThumbsUp += HandleC1Confirmation;
+            _c1GestureHandler.OnThumbsDown += HandleC1Rejection;
+        }
+        
         // Subscribe to our own events to handle internal logic
-        OnConfirm += HandleConfirmInternal;
-        OnReject += HandleRejectInternal;
+        OnC1Confirmation += HandleConfirmInternal;
+        OnC1Rejection += HandleRejectInternal;
         OnGuidance += HandleGuidanceInternal;
     }
     
     private void OnDisable()
     {
+        // Unsubscribe from gesture events
+        if (_c1GestureHandler != null)
+        {
+            _c1GestureHandler.OnThumbsUp -= HandleC1Confirmation;
+            _c1GestureHandler.OnThumbsDown -= HandleC1Rejection;
+        }
+        
         // Unsubscribe to prevent memory leaks
-        OnConfirm -= HandleConfirmInternal;
-        OnReject -= HandleRejectInternal;
+        OnC1Confirmation -= HandleConfirmInternal;
+        OnC1Rejection -= HandleRejectInternal;
         OnGuidance -= HandleGuidanceInternal;
     }
     
@@ -145,9 +198,11 @@ public class InteractionManager : MonoBehaviour
     /// </summary>
     public void StartC1Confirm()
     {
-        StopActiveCoroutine();
-        IsC1Completed = false;
-        _activeCoroutine = StartCoroutine(RunC1Confirm());
+        if (_activeCoroutine != null)
+        {
+            StopCoroutine(_activeCoroutine);
+        }
+        _activeCoroutine = StartCoroutine(C1ConfirmRoutine());
     }
     
     /// <summary>
@@ -160,40 +215,77 @@ public class InteractionManager : MonoBehaviour
         _activeCoroutine = StartCoroutine(RunC2Guidance());
     }
     
+    /// <summary>
+    /// Gets the current C-1 target position.
+    /// </summary>
+    public Vector3 GetC1TargetPosition()
+    {
+        if (_zoneRandomizer == null)
+        {
+            Debug.LogError("ZoneRandomizer reference is missing on InteractionManager!");
+            return transform.position; // Return current position as fallback
+        }
+        
+        Transform target = _zoneRandomizer.GetTarget(_c1ZoneIndex);
+        if (target == null)
+        {
+            Debug.LogError($"C1 target transform not found at index {_c1ZoneIndex}!");
+            return transform.position; // Return current position as fallback
+        }
+        
+        return target.position;
+    }
+    
     #endregion
     
     #region Scenario Implementations
     
-    private IEnumerator RunC1Confirm()
+    private IEnumerator C1ConfirmRoutine()
     {
-        // 1) Randomize the target position
-        Vector3 targetPos = _zoneRandomizer.RandomizeTargetPosition(_c1ZoneIndex);
-        
-        // 2) Show the C1 UI (thumbs up/down)
+        // Show the C1 cue
         ShowC1Cue();
         
-        // Local tracking vars
-        bool answered = false;
-        float timer = 0f;
-        
-        // 3) Wait for user input
-        while (!answered)
+        // Start updating the spline
+        if (_splineUpdateCoroutine != null)
         {
-            // Auto-reject after timeout if configured
-            if (_autoRejectTime > 0f && (timer += Time.deltaTime) >= _autoRejectTime)
+            StopCoroutine(_splineUpdateCoroutine);
+        }
+        _splineUpdateCoroutine = StartCoroutine(UpdateSplineRoutine());
+        
+        // Wait for user input or auto-reject
+        float elapsedTime = 0f;
+        bool completed = false;
+        
+        while (!completed)
+        {
+            elapsedTime += Time.deltaTime;
+            
+            // Check for auto-reject
+            if (_autoRejectTime > 0 && elapsedTime >= _autoRejectTime)
             {
-                // Move to new position (auto-reject)
-                targetPos = _zoneRandomizer.RandomizeTargetPosition(_c1ZoneIndex);
-                timer = 0f;
+                HandleC1Rejection();
+                completed = true;
+            }
+            
+            // Check for other completion conditions
+            if (IsC1Completed || IsC1Rejected)
+            {
+                completed = true;
             }
             
             yield return null;
         }
         
-        // 4) Cleanup
+        // Stop updating the spline
+        if (_splineUpdateCoroutine != null)
+        {
+            StopCoroutine(_splineUpdateCoroutine);
+            _splineUpdateCoroutine = null;
+        }
+        
+        // Hide all cues
         HideAllCues();
         _activeCoroutine = null;
-        IsC1Completed = true;
     }
     
     private IEnumerator RunC2Guidance()
@@ -233,24 +325,64 @@ public class InteractionManager : MonoBehaviour
     #region UI Methods
     
     /// <summary>Show the C-1 confirmation UI (thumbs up/down).</summary>
-    private void ShowC1Cue()
+    public void ShowC1Cue()
     {
-        _c2CueObject.SetActive(false);
-        _c1CueObject.SetActive(true);
+        if (_c1CuePrefab == null)
+        {
+            Debug.LogError("C1 cue prefab not assigned!");
+            return;
+        }
+
+        // Randomize the target position (which will move the cue since it's a child)
+        _zoneRandomizer.RandomizeTargetPosition(_c1ZoneIndex);
+        
+        // Simply activate the cue
+        _c1CuePrefab.SetActive(true);
+
+        // Show spline from drone to target
+        if (_splineVisualizer != null)
+        {
+            _splineVisualizer.UpdateSpline(_droneController.transform.position, _c1CuePrefab.transform.position);
+            _splineVisualizer.ShowSpline(true);
+        }
+        
+        // Enable gesture recognition
+        if (_c1GestureHandler != null)
+        {
+            _c1GestureHandler.SetActive(true);
+        }
     }
     
     /// <summary>Show the C-2 guidance UI.</summary>
     private void ShowC2Cue()
     {
-        _c1CueObject.SetActive(false);
+        _c1CuePrefab.SetActive(false);
         _c2CueObject.SetActive(true);
     }
     
     /// <summary>Hide all AR cues.</summary>
     public void HideAllCues()
     {
-        _c1CueObject.SetActive(false);
-        _c2CueObject.SetActive(false);
+        if (_c1CuePrefab != null)
+        {
+            _c1CuePrefab.SetActive(false);
+        }
+
+        if (_c2CueObject != null)
+        {
+            _c2CueObject.SetActive(false);
+        }
+
+        if (_splineVisualizer != null)
+        {
+            _splineVisualizer.ShowSpline(false);
+        }
+        
+        // Disable gesture recognition
+        if (_c1GestureHandler != null)
+        {
+            _c1GestureHandler.SetActive(false);
+        }
     }
     
     /// <summary>
@@ -268,6 +400,7 @@ public class InteractionManager : MonoBehaviour
         // Reset scenario completion flags
         IsC1Completed = false;
         IsC2Completed = false;
+        IsC1Rejected = false;
     }
     
     #endregion
@@ -275,15 +408,19 @@ public class InteractionManager : MonoBehaviour
     #region UI Event Handlers
     
     /// <summary>Called by UnityEvent when user confirms the landing spot.</summary>
-    public void HandleConfirm(Vector3 worldPoint)
+    public void HandleC1Confirmation()
     {
-        OnConfirm?.Invoke(worldPoint);
+        IsC1Completed = true;
+        IsC1Rejected = false;
+        OnC1Confirmation?.Invoke(_c1CuePrefab.transform.position);
     }
     
     /// <summary>Called by UnityEvent when user rejects the landing spot.</summary>
-    public void HandleReject()
+    public void HandleC1Rejection()
     {
-        OnReject?.Invoke();
+        IsC1Completed = false;
+        IsC1Rejected = true;
+        OnC1Rejection?.Invoke();
     }
     
     /// <summary>Called by UnityEvent when user provides guidance.</summary>
@@ -301,12 +438,18 @@ public class InteractionManager : MonoBehaviour
         // Mark as answered to complete the scenario
         StopActiveCoroutine();
         IsC1Completed = true;
+        IsC1Rejected = false;
+        HideAllCues();
     }
     
     private void HandleRejectInternal()
     {
-        // Move to a new random position in the zone
-        _zoneRandomizer.RandomizeTargetPosition(_c1ZoneIndex);
+        // Just mark as rejected - the scenario manager will handle the retry logic
+        IsC1Completed = false;
+        IsC1Rejected = true;
+        
+        // Hide cues but don't randomize position - that's handled by the scenario
+        HideAllCues();
     }
     
     private void HandleGuidanceInternal(Vector3 position)
@@ -326,4 +469,16 @@ public class InteractionManager : MonoBehaviour
     }
     
     #endregion
+    
+    private IEnumerator UpdateSplineRoutine()
+    {
+        while (true)
+        {
+            if (_splineVisualizer != null && _c1CuePrefab != null)
+            {
+                _splineVisualizer.UpdateSpline(_droneController.transform.position, _c1CuePrefab.transform.position);
+            }
+            yield return new WaitForSeconds(0.1f);
+        }
+    }
 } 

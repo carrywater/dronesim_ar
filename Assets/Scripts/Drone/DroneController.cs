@@ -20,6 +20,7 @@ public class DroneController : MonoBehaviour
     [Header("Essential References")]
     [SerializeField] private DroneArrivalDetector _navigation;   // For arrival callbacks
     [SerializeField] private Transform _droneOffset;             // Visual model and components
+    [SerializeField] private Transform _droneBody;        // The actual drone body transform
     [Tooltip("Transform to track - should be the OVR HMD (head) transform")]
     [SerializeField] private Transform _hmdTransform;
     [SerializeField] private PIDController _pidController;       // Subtle random hover sway (different from directional tilting)
@@ -28,6 +29,7 @@ public class DroneController : MonoBehaviour
     [Header("Drone Components")]
     [SerializeField] private Transform[] _propellers;
     [SerializeField] private LegConfig[] _legConfigs;
+    [SerializeField] private Transform[] _rotors;         // Rotor transforms for animation
     
     [Header("Behavior Settings")]
     [Tooltip("Enable scanning behavior in hover state")]
@@ -384,7 +386,7 @@ public class DroneController : MonoBehaviour
             // Face participant
             Quaternion targetRotation = Quaternion.LookRotation(_targetHmdDirection);
             
-            // Smooth rotation
+            // Smooth rotation - apply only to the offset transform
             _droneOffset.rotation = Quaternion.Slerp(
                 _droneOffset.rotation, 
                 targetRotation, 
@@ -556,7 +558,7 @@ public class DroneController : MonoBehaviour
 
     private void EnterLanding()
     {
-        Vector3 currentPos = _droneOffset.localPosition;
+        Vector3 currentPos = _droneBody.position;
         try
         {
             Vector3 targetLocalPos = WorldToLocalPoint(_landingSpot);
@@ -565,28 +567,36 @@ public class DroneController : MonoBehaviour
                 Debug.LogError($"Invalid target position after world-to-local conversion: {targetLocalPos}. Using safe position.");
                 targetLocalPos = new Vector3(currentPos.x, 0.1f, currentPos.z);
             }
-            _targetPosition = targetLocalPos;
+
+            // First move horizontally to align with landing spot
+            Vector3 horizontalTarget = new Vector3(targetLocalPos.x, currentPos.y, targetLocalPos.z);
+            _targetPosition = horizontalTarget;
+            
+            // Calculate horizontal distance for smooth time
             Vector2 currentHorizontal = new Vector2(currentPos.x, currentPos.z);
             Vector2 targetHorizontal = new Vector2(_targetPosition.x, _targetPosition.z);
             float horizontalDistance = Vector2.Distance(currentHorizontal, targetHorizontal);
+            
             if (horizontalDistance > 50f)
             {
                 Debug.LogWarning($"Landing spot too far horizontally: {horizontalDistance}m. Limiting distance.");
                 Vector2 direction = (targetHorizontal - currentHorizontal).normalized;
                 targetHorizontal = currentHorizontal + direction * 50f;
-                _targetPosition = new Vector3(targetHorizontal.x, _landingSpot.y, targetHorizontal.y);
+                _targetPosition = new Vector3(targetHorizontal.x, currentPos.y, targetHorizontal.y);
             }
-            if (_targetPosition.y < 0.1f)
-            {
-                _targetPosition.y = 0.1f;
-            }
+
+            // Use cruise speed for horizontal movement
+            _positionSmoothTime = Mathf.Max(_minSmoothTime, horizontalDistance / _cruiseSpeed);
+            
+            // Start a coroutine to handle the descent after horizontal alignment
+            StartCoroutine(LandingSequence(targetLocalPos));
         }
         catch (System.Exception ex)
         {
             Debug.LogError($"Error setting landing target: {ex.Message}. Using safe position.");
             _targetPosition = new Vector3(currentPos.x, 0.1f, currentPos.z);
         }
-        _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Abs(currentPos.y - _targetPosition.y) / _landingDescentSpeed);
+
         _rotorsSpinning = true;
         if (_pidController != null)
         {
@@ -597,7 +607,39 @@ public class DroneController : MonoBehaviour
             _hmi.SetPropellerPitch(0.9f);
             _hmi.PlayLandingSignal();
         }
-        Debug.Log($"DRONE_Y_DEBUG: EnterLanding | localY={currentPos.y:F2} -> targetY={_targetPosition.y:F2}");
+        Debug.Log($"DRONE_Y_DEBUG: EnterLanding | bodyY={currentPos.y:F2} -> targetY={_targetPosition.y:F2}");
+    }
+
+    private IEnumerator LandingSequence(Vector3 finalLandingPos)
+    {
+        // Wait for horizontal alignment
+        float startTime = Time.time;
+        float maxWaitTime = 5f; // Maximum time to wait for horizontal alignment
+        
+        while (Time.time - startTime < maxWaitTime)
+        {
+            Vector3 currentPos = _droneBody.position;
+            Vector2 currentHorizontal = new Vector2(currentPos.x, currentPos.z);
+            Vector2 targetHorizontal = new Vector2(_targetPosition.x, _targetPosition.z);
+            float horizontalDistance = Vector2.Distance(currentHorizontal, targetHorizontal);
+            
+            if (horizontalDistance < 0.1f) // Small threshold for horizontal alignment
+            {
+                break;
+            }
+            yield return null;
+        }
+        
+        // Now start descending
+        Vector3 currentPosition = _droneBody.position;
+        _targetPosition = finalLandingPos;
+        if (_targetPosition.y < 0.02f)
+        {
+            _targetPosition.y = 0.02f; // Match the landing spot ring height
+        }
+        
+        // Use landing descent speed for vertical movement
+        _positionSmoothTime = Mathf.Max(_minSmoothTime, Mathf.Abs(currentPosition.y - _targetPosition.y) / _landingDescentSpeed);
     }
 
     private void EnterLandAbort()
@@ -826,7 +868,7 @@ public class DroneController : MonoBehaviour
         {
             Debug.LogError($"Invalid landing spot detected: {spot}. Using current position instead.");
             spot = currentWorldPos;
-            spot.y = 0.1f; // Just above ground level
+            spot.y = 0.02f; // Match the landing spot ring height
         }
         
         // Check for extreme values that would cause the drone to fly off
@@ -843,10 +885,10 @@ public class DroneController : MonoBehaviour
         }
         
         // Ensure landing spot has reasonable Y value
-        if (spot.y < 0.1f)
+        if (spot.y < 0.02f)
         {
             Debug.LogWarning($"Landing spot Y value is too low ({spot.y}), adjusting to prevent floor penetration");
-            spot.y = 0.1f;
+            spot.y = 0.02f; // Match the landing spot ring height
         }
         
         // Store the landing spot for use in the landing state
@@ -973,9 +1015,6 @@ public class DroneController : MonoBehaviour
     /// </summary>
     private void FaceMovementDirection()
     {
-        // Store original position
-        Vector3 originalPosition = _droneOffset.localPosition;
-        
         // Get movement direction in XZ plane (world space)
         Vector3 movement = new Vector3(_cruiseTargetPosition.x, 0, _cruiseTargetPosition.z) - 
                           new Vector3(_transform.position.x + _droneOffset.localPosition.x, 0, 
@@ -986,15 +1025,12 @@ public class DroneController : MonoBehaviour
             // Calculate target rotation to face movement direction
             Quaternion targetRotation = Quaternion.LookRotation(movement);
             
-            // Smooth rotation - apply to the offset transform
+            // Smooth rotation - apply only to the offset transform
             _droneOffset.rotation = Quaternion.Slerp(
                 _droneOffset.rotation, 
                 targetRotation, 
                 _rotationSpeed * Time.deltaTime);
         }
-        
-        // Preserve original position to prevent jumping
-        _droneOffset.localPosition = originalPosition;
     }
 
     /// <summary>
@@ -1385,28 +1421,22 @@ public class DroneController : MonoBehaviour
         Quaternion targetRotation = Quaternion.LookRotation(_targetHmdDirection);
         
         // Limit rotation angle
-        float currentAngle = Quaternion.Angle(transform.rotation, targetRotation);
+        float currentAngle = Quaternion.Angle(_droneOffset.rotation, targetRotation);
         if (currentAngle > _maxHmdRotationAngle)
         {
             targetRotation = Quaternion.RotateTowards(
-                transform.rotation,
+                _droneOffset.rotation,
                 targetRotation,
                 _maxHmdRotationAngle
             );
         }
 
-        // Smoothly rotate towards target
-        transform.rotation = Quaternion.Slerp(
-            transform.rotation,
+        // Smoothly rotate only the drone offset towards target
+        _droneOffset.rotation = Quaternion.Slerp(
+            _droneOffset.rotation,
             targetRotation,
             _hmdTrackingSpeed * Time.deltaTime
         );
-    }
-    
-    // Returns true if the drone is at its target Y within a threshold
-    public bool IsAtTargetY(float threshold = 0.1f)
-    {
-        return Mathf.Abs(_droneOffset.localPosition.y - _targetPosition.y) < threshold;
     }
     
     #endregion

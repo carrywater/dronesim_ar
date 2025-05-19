@@ -25,7 +25,7 @@ public class DroneHMI : MonoBehaviour
     [SerializeField] private AudioClip _mediumConfidenceClip;
     [SerializeField] private AudioClip _abortClip;
     [SerializeField] private AudioClip _successClip;
-    [SerializeField] private AudioClip _falseGestureClip;
+    [SerializeField] private AudioClip _rejectClip;
 
     [Header("Spatial Audio Settings")]
     [Tooltip("Minimum distance before sound starts to attenuate")]
@@ -43,7 +43,7 @@ public class DroneHMI : MonoBehaviour
     [SerializeField] private float _reverbZoneMix = 1.0f;
 
     // HMI state enumeration
-    public enum HMIState { Idle, Uncertain, PromptConfirm, PromptGuide, Landing, Abort, Success }
+    public enum HMIState { Idle, Uncertain, PromptConfirm, PromptGuide, Landing, Abort, Success, Reject }
     private HMIState _currentState;
 
     // Internal sound management
@@ -190,6 +190,10 @@ public class DroneHMI : MonoBehaviour
                     _ledAnimator.SetTrigger("Success");
                     PlayOneShot(_successClip);
                     break;
+                case HMIState.Reject:
+                    _ledAnimator.SetTrigger("Reject");
+                    PlayOneShot(_rejectClip);
+                    break;
             }
         }
     }
@@ -262,7 +266,13 @@ public class DroneHMI : MonoBehaviour
         {
             _signalSource.clip = _landingBeepClip;
             _signalSource.loop = true;
+            _signalSource.volume = 1.0f; // Ensure volume is set
             _signalSource.Play();
+            Debug.Log("Playing landing signal sound");
+        }
+        else
+        {
+            Debug.LogWarning("Cannot play landing signal - missing audio source or clip");
         }
     }
 
@@ -274,6 +284,7 @@ public class DroneHMI : MonoBehaviour
         if (_signalSource != null)
         {
             _signalSource.Stop();
+            Debug.Log("Stopped landing signal sound");
         }
     }
 
