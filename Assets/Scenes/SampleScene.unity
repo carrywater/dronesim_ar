@@ -54785,7 +54785,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 83ac0e1918118654382ce3671b65398d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _splineThickness: 0.1
+  _splineThickness: 1
   _splineMaterial: {fileID: 2100000, guid: 55455650e57500c449834db2e08df6f3, type: 2}
   _splineColor: {r: 0, g: 1, b: 1, a: 1}
 --- !u!114 &1551115689
