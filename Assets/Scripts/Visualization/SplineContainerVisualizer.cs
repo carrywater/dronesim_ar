@@ -1,63 +1,52 @@
 using UnityEngine;
-using Unity.Mathematics;
 using UnityEngine.Splines;
+using Unity.Mathematics;
 
 namespace Visualization
 {
     [RequireComponent(typeof(SplineContainer))]
     public class SplineContainerVisualizer : MonoBehaviour
     {
-        [Header("Spline Settings")]
-        [SerializeField] private float _splineThickness = 0.1f;
-        [SerializeField] private Material _splineMaterial;
-        [SerializeField] private Color _splineColor = Color.cyan;
-        
         private SplineContainer _splineContainer;
-        private Spline _spline;
-        private BezierKnot[] _knots;
-        
+
         private void Awake()
         {
             _splineContainer = GetComponent<SplineContainer>();
-            _spline = new Spline();
-            _splineContainer.Spline = _spline;
-            
-            // Initialize with 2 knots (start and end)
-            _knots = new BezierKnot[2];
-            _spline.Knots = _knots;
-            
-            // Set material properties
-            if (_splineMaterial != null)
+            if (_splineContainer == null)
+                Debug.LogError("SplineContainer not found!");
+        }
+
+        /// <summary>
+        /// Update the spline to connect two points in world space.
+        /// </summary>
+        public void UpdateSpline(Vector3 worldStart, Vector3 worldEnd)
+        {
+            if (_splineContainer == null) return;
+            var spline = _splineContainer.Spline;
+            // Convert world positions to local positions relative to the SplineContainer's transform
+            Vector3 localStart = transform.InverseTransformPoint(worldStart);
+            Vector3 localEnd = transform.InverseTransformPoint(worldEnd);
+
+            if (spline.Count != 2)
             {
-                _splineMaterial.color = _splineColor;
+                spline.Clear();
+                spline.Add(new BezierKnot(localStart));
+                spline.Add(new BezierKnot(localEnd));
             }
-        }
-        
-        public void UpdateSpline(Vector3 startPoint, Vector3 endPoint)
-        {
-            // Update start knot
-            _knots[0] = new BezierKnot
+            else
             {
-                Position = startPoint,
-                TangentIn = new float3(0, 0, 0),
-                TangentOut = new float3(0, 0, 0)
-            };
-            
-            // Update end knot
-            _knots[1] = new BezierKnot
-            {
-                Position = endPoint,
-                TangentIn = new float3(0, 0, 0),
-                TangentOut = new float3(0, 0, 0)
-            };
-            
-            // Update spline
-            _spline.Knots = _knots;
+                spline[0] = new BezierKnot(localStart);
+                spline[1] = new BezierKnot(localEnd);
+            }
+            _splineContainer.Spline = spline;
         }
-        
-        public void ShowSpline(bool show)
+
+        /// <summary>
+        /// Show or hide the spline.
+        /// </summary>
+        public void SetVisible(bool visible)
         {
-            gameObject.SetActive(show);
+            gameObject.SetActive(visible);
         }
     }
 } 

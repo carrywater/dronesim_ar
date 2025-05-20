@@ -22,18 +22,22 @@ public class C1GestureHandler : MonoBehaviour
         if (_leftThumbsUpSelector != null)
         {
             _leftThumbsUpSelector.WhenSelected.AddListener(HandleThumbsUp);
+            Debug.Log("[C1GestureHandler] Subscribed to left thumbs up selector.");
         }
         if (_leftThumbsDownSelector != null)
         {
             _leftThumbsDownSelector.WhenSelected.AddListener(HandleThumbsDown);
+            Debug.Log("[C1GestureHandler] Subscribed to left thumbs down selector.");
         }
         if (_rightThumbsUpSelector != null)
         {
             _rightThumbsUpSelector.WhenSelected.AddListener(HandleThumbsUp);
+            Debug.Log("[C1GestureHandler] Subscribed to right thumbs up selector.");
         }
         if (_rightThumbsDownSelector != null)
         {
             _rightThumbsDownSelector.WhenSelected.AddListener(HandleThumbsDown);
+            Debug.Log("[C1GestureHandler] Subscribed to right thumbs down selector.");
         }
     }
     
@@ -65,17 +69,29 @@ public class C1GestureHandler : MonoBehaviour
     
     private void HandleThumbsUp()
     {
+        Debug.Log("[C1GestureHandler] HandleThumbsUp called. isActive=" + _isActive);
         if (_isActive)
         {
+            Debug.Log("[C1GestureHandler] OnThumbsUp event invoked.");
             OnThumbsUp?.Invoke();
+        }
+        else
+        {
+            Debug.LogWarning("[C1GestureHandler] Thumbs up gesture ignored because handler is not active.");
         }
     }
     
     private void HandleThumbsDown()
     {
+        Debug.Log("[C1GestureHandler] HandleThumbsDown called. isActive=" + _isActive);
         if (_isActive)
         {
+            Debug.Log("[C1GestureHandler] OnThumbsDown event invoked.");
             OnThumbsDown?.Invoke();
+        }
+        else
+        {
+            Debug.LogWarning("[C1GestureHandler] Thumbs down gesture ignored because handler is not active.");
         }
     }
 } 

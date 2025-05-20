@@ -17,8 +17,6 @@ public class InteractionManager : MonoBehaviour
     [SerializeField] private C1GestureHandler _c1GestureHandler;
     
     [Header("AR Cue Objects")]
-    [Tooltip("Prefab for the C1 confirmation UI (thumbs up/down)")]
-    [SerializeField] private GameObject _c1CuePrefab;
     [Tooltip("The C2 guidance UI")]
     [SerializeField] private GameObject _c2CueObject;
     
@@ -40,6 +38,23 @@ public class InteractionManager : MonoBehaviour
     
     [Header("Visualization")]
     [SerializeField] private SplineContainerVisualizer _splineVisualizer;
+    
+    [Header("Spline Anchors")]
+    [SerializeField] private Transform _dronePivot;
+    [SerializeField] private Transform _cuePivot;
+    
+    [Header("C-1 Cues")]
+    [SerializeField] private GameObject _thumbCueObject; // thumbs up/down
+    [SerializeField] private GameObject _landingRingObject; // landing ring
+    
+    [Header("Debug/Startup")]
+    [Tooltip("Show C1 cues at startup for debugging/demo")] 
+    [SerializeField] private bool _showC1CuesAtStartup = false;
+    
+    [Header("Interaction Zones")]
+    [SerializeField] private GameObject _interactionZone; // The parent interaction zone mesh (shared by C1 and C2)
+    [Header("C-2 Cues")]
+    [SerializeField] private GameObject _c2RingObject; // The C2 ring prefab (to be enabled after user selects landing)
     
     // Runtime instance of the C1 cue
     private GameObject _c1CueInstance;
@@ -66,26 +81,37 @@ public class InteractionManager : MonoBehaviour
             _droneController = FindObjectOfType<DroneController>();
         }
         
+        // Ensure spline visualizer is set up
         if (_splineVisualizer == null)
         {
             _splineVisualizer = FindObjectOfType<SplineContainerVisualizer>();
+            if (_splineVisualizer == null)
+            {
+                Debug.LogError("No SplineContainerVisualizer found in scene!");
+            }
         }
-        
+
+        // Ensure C1 gesture handler is set up
         if (_c1GestureHandler == null)
         {
             _c1GestureHandler = GetComponentInChildren<C1GestureHandler>();
         }
 
-        // Ensure C1 cue is deactivated at start
-        if (_c1CuePrefab != null)
+        // Optionally show C1 cues at startup for debugging/demo
+        if (_showC1CuesAtStartup)
         {
-            _c1CuePrefab.SetActive(false);
+            ShowC1Cue();
+        }
+        else
+        {
+            HideAllCues();
         }
     }
     
     private void OnEnable()
     {
-        HideAllCues();
+        if (!_showC1CuesAtStartup)
+            HideAllCues();
         
         // Subscribe to gesture events
         if (_c1GestureHandler != null)
@@ -327,61 +353,87 @@ public class InteractionManager : MonoBehaviour
     /// <summary>Show the C-1 confirmation UI (thumbs up/down).</summary>
     public void ShowC1Cue()
     {
-        if (_c1CuePrefab == null)
-        {
-            Debug.LogError("C1 cue prefab not assigned!");
-            return;
-        }
-
-        // Randomize the target position (which will move the cue since it's a child)
-        _zoneRandomizer.RandomizeTargetPosition(_c1ZoneIndex);
-        
-        // Simply activate the cue
-        _c1CuePrefab.SetActive(true);
-
-        // Show spline from drone to target
-        if (_splineVisualizer != null)
-        {
-            _splineVisualizer.UpdateSpline(_droneController.transform.position, _c1CuePrefab.transform.position);
-            _splineVisualizer.ShowSpline(true);
-        }
-        
-        // Enable gesture recognition
         if (_c1GestureHandler != null)
         {
             _c1GestureHandler.SetActive(true);
+            Debug.Log("[InteractionManager] C1GestureHandler activated.");
+        }
+        Debug.Log("[InteractionManager] ShowC1Cue called: Enabling thumbs cue and landing ring.");
+        if (_thumbCueObject != null)
+        {
+            _thumbCueObject.SetActive(true);
+            Debug.Log("[InteractionManager] Thumbs cue enabled.");
+        }
+        else
+        {
+            Debug.LogWarning("[InteractionManager] Thumbs cue object is null!");
+        }
+        if (_landingRingObject != null)
+        {
+            _landingRingObject.SetActive(true);
+            Debug.Log("[InteractionManager] Landing ring enabled.");
+        }
+        else
+        {
+            Debug.LogWarning("[InteractionManager] Landing ring object is null!");
+        }
+        if (_splineVisualizer != null && _dronePivot != null && _cuePivot != null)
+        {
+            _splineVisualizer.UpdateSpline(_dronePivot.position, _cuePivot.position);
+            _splineVisualizer.SetVisible(true);
+            Debug.Log("[InteractionManager] Spline visualizer enabled.");
+            StartSplineUpdateRoutine();
+        }
+        else
+        {
+            Debug.LogWarning("[InteractionManager] Spline visualizer or pivots are null!");
         }
     }
     
-    /// <summary>Show the C-2 guidance UI.</summary>
-    private void ShowC2Cue()
+    /// <summary>Show the C-2 guidance UI and enable the interaction zone.</summary>
+    public void ShowC2Cue()
     {
-        _c1CuePrefab.SetActive(false);
-        _c2CueObject.SetActive(true);
+        if (_interactionZone != null)
+        {
+            _interactionZone.SetActive(true);
+            Debug.Log("[InteractionManager] Interaction zone enabled for C2.");
+        }
+        if (_c2CueObject != null)
+        {
+            _c2CueObject.SetActive(true);
+            Debug.Log("[InteractionManager] C2 cue enabled.");
+        }
     }
     
     /// <summary>Hide all AR cues.</summary>
     public void HideAllCues()
     {
-        if (_c1CuePrefab != null)
-        {
-            _c1CuePrefab.SetActive(false);
-        }
-
-        if (_c2CueObject != null)
-        {
-            _c2CueObject.SetActive(false);
-        }
-
-        if (_splineVisualizer != null)
-        {
-            _splineVisualizer.ShowSpline(false);
-        }
-        
-        // Disable gesture recognition
         if (_c1GestureHandler != null)
         {
             _c1GestureHandler.SetActive(false);
+            Debug.Log("[InteractionManager] C1GestureHandler deactivated.");
+        }
+        Debug.Log("[InteractionManager] HideAllCues called: Disabling all cues and spline.");
+        if (_thumbCueObject != null)
+        {
+            _thumbCueObject.SetActive(false);
+            Debug.Log("[InteractionManager] Thumbs cue disabled.");
+        }
+        if (_landingRingObject != null)
+        {
+            _landingRingObject.SetActive(false);
+            Debug.Log("[InteractionManager] Landing ring disabled.");
+        }
+        if (_c2CueObject != null)
+        {
+            _c2CueObject.SetActive(false);
+            Debug.Log("[InteractionManager] C2 cue disabled.");
+        }
+        if (_splineVisualizer != null)
+        {
+            _splineVisualizer.SetVisible(false);
+            Debug.Log("[InteractionManager] Spline visualizer disabled.");
+            StopSplineUpdateRoutine();
         }
     }
     
@@ -403,6 +455,65 @@ public class InteractionManager : MonoBehaviour
         IsC1Rejected = false;
     }
     
+    public void HideLandingVisualization()
+    {
+        if (_landingRingObject != null)
+            _landingRingObject.SetActive(false);
+        if (_splineVisualizer != null)
+            _splineVisualizer.SetVisible(false);
+        if (_splineUpdateCoroutine != null)
+        {
+            StopCoroutine(_splineUpdateCoroutine);
+            _splineUpdateCoroutine = null;
+        }
+    }
+    
+    /// <summary>Hide the C-2 guidance UI and disable the interaction zone.</summary>
+    public void HideC2Cue()
+    {
+        if (_interactionZone != null)
+        {
+            _interactionZone.SetActive(false);
+            Debug.Log("[InteractionManager] Interaction zone disabled for C2.");
+        }
+        if (_c2CueObject != null)
+        {
+            _c2CueObject.SetActive(false);
+            Debug.Log("[InteractionManager] C2 cue disabled.");
+        }
+    }
+
+    /// <summary>Enable the C2 ring and draw the spline to the target.</summary>
+    public void ShowC2RingAndSpline(Vector3 dronePos, Vector3 targetPos)
+    {
+        if (_c2RingObject != null)
+        {
+            _c2RingObject.SetActive(true);
+            Debug.Log("[InteractionManager] C2 ring enabled.");
+        }
+        if (_splineVisualizer != null)
+        {
+            _splineVisualizer.UpdateSpline(dronePos, targetPos);
+            _splineVisualizer.SetVisible(true);
+            Debug.Log("[InteractionManager] Spline visualizer enabled for C2.");
+        }
+    }
+
+    /// <summary>Hide the C2 ring and spline.</summary>
+    public void HideC2RingAndSpline()
+    {
+        if (_c2RingObject != null)
+        {
+            _c2RingObject.SetActive(false);
+            Debug.Log("[InteractionManager] C2 ring disabled.");
+        }
+        if (_splineVisualizer != null)
+        {
+            _splineVisualizer.SetVisible(false);
+            Debug.Log("[InteractionManager] Spline visualizer disabled for C2.");
+        }
+    }
+    
     #endregion
     
     #region UI Event Handlers
@@ -412,7 +523,18 @@ public class InteractionManager : MonoBehaviour
     {
         IsC1Completed = true;
         IsC1Rejected = false;
-        OnC1Confirmation?.Invoke(_c1CuePrefab.transform.position);
+        Debug.Log("[InteractionManager] IsC1Completed set to true, IsC1Rejected set to false in HandleC1Confirmation.");
+        Debug.Log("[InteractionManager] HandleC1Confirmation called: Hiding thumbs cue only (landing ring and spline remain visible).");
+        if (_thumbCueObject != null)
+        {
+            _thumbCueObject.SetActive(false);
+            Debug.Log("[InteractionManager] Thumbs cue disabled (on confirmation).");
+        }
+        else
+        {
+            Debug.LogWarning("[InteractionManager] Thumbs cue object is null on confirmation!");
+        }
+        // Do not hide landing ring or spline
     }
     
     /// <summary>Called by UnityEvent when user rejects the landing spot.</summary>
@@ -420,7 +542,9 @@ public class InteractionManager : MonoBehaviour
     {
         IsC1Completed = false;
         IsC1Rejected = true;
-        OnC1Rejection?.Invoke();
+        Debug.Log("[InteractionManager] IsC1Completed set to false, IsC1Rejected set to true in HandleC1Rejection.");
+        Debug.Log("[InteractionManager] HandleC1Rejection called: Hiding all cues and spline.");
+        HideAllCues();
     }
     
     /// <summary>Called by UnityEvent when user provides guidance.</summary>
@@ -472,13 +596,47 @@ public class InteractionManager : MonoBehaviour
     
     private IEnumerator UpdateSplineRoutine()
     {
+        if (_splineVisualizer == null)
+        {
+            Debug.LogError("Spline visualizer is null!");
+            yield break;
+        }
+
+        const float updateInterval = 0.05f; // 20 updates per second
+        Vector3 lastDronePos = Vector3.zero;
+        Vector3 lastCuePos = Vector3.zero;
+
         while (true)
         {
-            if (_splineVisualizer != null && _c1CuePrefab != null)
+            if (_splineVisualizer != null && _dronePivot != null && _cuePivot != null)
             {
-                _splineVisualizer.UpdateSpline(_droneController.transform.position, _c1CuePrefab.transform.position);
+                Vector3 dronePos = _dronePivot.position;
+                Vector3 cuePos = _cuePivot.position;
+                // Only update if positions changed significantly
+                if ((dronePos - lastDronePos).sqrMagnitude > 0.0001f || (cuePos - lastCuePos).sqrMagnitude > 0.0001f)
+                {
+                    _splineVisualizer.UpdateSpline(dronePos, cuePos);
+                    lastDronePos = dronePos;
+                    lastCuePos = cuePos;
+                }
             }
-            yield return new WaitForSeconds(0.1f);
+            yield return new WaitForSeconds(updateInterval);
+        }
+    }
+
+    private void StartSplineUpdateRoutine()
+    {
+        if (_splineUpdateCoroutine != null)
+            StopCoroutine(_splineUpdateCoroutine);
+        _splineUpdateCoroutine = StartCoroutine(UpdateSplineRoutine());
+    }
+
+    private void StopSplineUpdateRoutine()
+    {
+        if (_splineUpdateCoroutine != null)
+        {
+            StopCoroutine(_splineUpdateCoroutine);
+            _splineUpdateCoroutine = null;
         }
     }
 } 

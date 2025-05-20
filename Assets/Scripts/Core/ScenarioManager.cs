@@ -923,90 +923,56 @@ public class ScenarioManager : MonoBehaviour
                 if (_interactionManager.IsC1Completed)
                 {
                     userResponded = true;
-                    
                     Debug.Log("C1: User confirmed, beginning landing");
-                    
                     // Begin landing at the target position
                     Vector3 landingPosition = _interactionManager.GetC1TargetPosition();
-                    landingPosition.y = 0f; // Land on ground
-                    
-                    // Update HMI for landing before starting the landing sequence
+                    landingPosition.y = 0f;
                     _hmi.SetStatus(DroneHMI.HMIState.Landing);
-                    
-                    // Start landing sequence
                     _drone.BeginLanding(landingPosition);
-                    
-                    // Wait for landing to complete
                     while (_drone.CurrentState != DroneController.FlightState.Idle)
-                    {
                         yield return null;
-                    }
-                    
-                    // Stop landing signal after landing is complete
                     _hmi.StopLandingSignal();
-                    
                     landingSuccessful = true;
-                    
-                    // Show success state
                     _hmi.SetStatus(DroneHMI.HMIState.Success);
                     yield return new WaitForSeconds(_c1PostLandingWaitTime);
                 }
                 else if (_interactionManager.IsC1Rejected)
                 {
                     userResponded = true;
-                    
                     Debug.Log($"C1: User rejected attempt {attempts}/{_c1MaxAttempts}");
-                    
-                    // Hide UI and spline
                     _interactionManager.HideAllCues();
-                    
-                    // Signal rejection
                     _hmi.SetStatus(DroneHMI.HMIState.Reject);
                     yield return new WaitForSeconds(0.5f);
-                    
-                    // If we have more attempts left, prepare for next attempt
                     if (attempts < _c1MaxAttempts)
                     {
-                        // Return to hover for next attempt
                         _drone.ReturnToHover();
                         yield return new WaitForSeconds(_decelerationTime + 0.2f);
-                        
-                        // Reset interaction state for next attempt
                         _interactionManager.HideAllInteractions();
                     }
                     else
                     {
-                        Debug.Log("C1: Maximum attempts reached, aborting mission");
                         _hmi.SetStatus(DroneHMI.HMIState.Abort);
                         _drone.Abort();
                     }
                 }
-                
                 yield return null;
             }
-            
-            // If we timed out
             if (!userResponded)
             {
                 Debug.Log("C1: User input timeout");
                 _interactionManager.HideAllCues();
                 _hmi.SetStatus(DroneHMI.HMIState.Reject);
                 yield return new WaitForSeconds(0.5f);
-                
-                // Return to hover
                 _drone.ReturnToHover();
                 yield return new WaitForSeconds(_decelerationTime + 0.2f);
             }
         }
-        
-        // If we failed all attempts, abort
         if (!landingSuccessful)
         {
             Debug.Log("C1: All landing attempts failed, aborting mission");
             _hmi.SetStatus(DroneHMI.HMIState.Abort);
             _drone.Abort();
         }
-        
         Debug.Log("Completed C-1 Scenario");
     }
     
