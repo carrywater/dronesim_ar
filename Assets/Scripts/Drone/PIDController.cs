@@ -11,9 +11,12 @@ public class PIDController : MonoBehaviour
     [SerializeField] private Transform _swayTransform;  // child transform to sway
     [SerializeField] private Vector3 _swayAmplitude = new Vector3(0.1f, 0.1f, 0.1f);
     [SerializeField] private float _swayFrequency = 1f;
+    [SerializeField] private float _damping = 0.98f; // Added for realism
+    [SerializeField] private float _outputNoise = 0.001f; // Small noise for realism
 
     private Vector3 _integral;
     private Vector3 _lastError;
+    private Vector3 _velocity;
 
     private void Update()
     {
@@ -38,10 +41,26 @@ public class PIDController : MonoBehaviour
         // PID output
         Vector3 output = _kp * error + _ki * _integral + _kd * derivative;
 
+        // Add small output noise for realism
+        output += Random.insideUnitSphere * _outputNoise;
+
+        // Integrate velocity (inertia)
+        _velocity += output * Time.deltaTime;
+        _velocity *= _damping; // Damping
+
         // Apply sway
-        _swayTransform.localPosition += output * Time.deltaTime;
+        _swayTransform.localPosition += _velocity * Time.deltaTime;
 
         // Store last error
         _lastError = error;
+    }
+
+    /// <summary>
+    /// Simulate an external influence (e.g., a strong gust) by applying a force to the velocity.
+    /// The controller will naturally correct this over time.
+    /// </summary>
+    public void ApplyExternalInfluence(Vector3 force)
+    {
+        _velocity += force;
     }
 } 

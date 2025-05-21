@@ -142,7 +142,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._BaseColor.r
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -271,7 +271,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._BaseColor.g
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -400,7 +400,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._BaseColor.b
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -529,7 +529,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._BaseColor.a
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -658,7 +658,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._EmissionColor.r
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -787,7 +787,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._EmissionColor.g
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -916,7 +916,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._EmissionColor.b
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -1045,7 +1045,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._EmissionColor.a
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -1058,7 +1058,7 @@ AnimationClip:
   m_ClipBindingConstant:
     genericBindings:
     - serializedVersion: 2
-      path: 3015137256
+      path: 2465373446
       attribute: 1136458424
       script: {fileID: 0}
       typeID: 23
@@ -1067,7 +1067,7 @@ AnimationClip:
       isIntCurve: 0
       isSerializeReferenceCurve: 0
     - serializedVersion: 2
-      path: 3015137256
+      path: 2465373446
       attribute: 1404893880
       script: {fileID: 0}
       typeID: 23
@@ -1076,7 +1076,7 @@ AnimationClip:
       isIntCurve: 0
       isSerializeReferenceCurve: 0
     - serializedVersion: 2
-      path: 3015137256
+      path: 2465373446
       attribute: 1673329336
       script: {fileID: 0}
       typeID: 23
@@ -1085,7 +1085,7 @@ AnimationClip:
       isIntCurve: 0
       isSerializeReferenceCurve: 0
     - serializedVersion: 2
-      path: 3015137256
+      path: 2465373446
       attribute: 1487100290
       script: {fileID: 0}
       typeID: 23
@@ -1094,7 +1094,7 @@ AnimationClip:
       isIntCurve: 0
       isSerializeReferenceCurve: 0
     - serializedVersion: 2
-      path: 3015137256
+      path: 2465373446
       attribute: 1755535746
       script: {fileID: 0}
       typeID: 23
@@ -1103,7 +1103,7 @@ AnimationClip:
       isIntCurve: 0
       isSerializeReferenceCurve: 0
     - serializedVersion: 2
-      path: 3015137256
+      path: 2465373446
       attribute: 1941764792
       script: {fileID: 0}
       typeID: 23
@@ -1112,7 +1112,7 @@ AnimationClip:
       isIntCurve: 0
       isSerializeReferenceCurve: 0
     - serializedVersion: 2
-      path: 3015137256
+      path: 2465373446
       attribute: 1218664834
       script: {fileID: 0}
       typeID: 23
@@ -1121,7 +1121,7 @@ AnimationClip:
       isIntCurve: 0
       isSerializeReferenceCurve: 0
     - serializedVersion: 2
-      path: 3015137256
+      path: 2465373446
       attribute: 2023971202
       script: {fileID: 0}
       typeID: 23
@@ -1276,7 +1276,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._BaseColor.r
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -1405,7 +1405,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._BaseColor.g
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -1534,7 +1534,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._BaseColor.b
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -1663,7 +1663,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._BaseColor.a
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -1792,7 +1792,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._EmissionColor.r
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -1921,7 +1921,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._EmissionColor.g
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -2050,7 +2050,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._EmissionColor.b
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0
@@ -2179,7 +2179,7 @@ AnimationClip:
       m_PostInfinity: 2
       m_RotationOrder: 4
     attribute: material._EmissionColor.a
-    path: Drone Offset/HMI
+    path: Drone Runtime Offset/Drone Manual Offset/HMI
     classID: 23
     script: {fileID: 0}
     flags: 0

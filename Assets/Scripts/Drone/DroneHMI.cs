@@ -1,4 +1,5 @@
 using UnityEngine;
+using System;
 using System.Linq;
 
 public class DroneHMI : MonoBehaviour
@@ -6,137 +7,49 @@ public class DroneHMI : MonoBehaviour
     [Header("LED Animator")]
     [SerializeField] private Animator _ledAnimator;  // controls emissive material animations
 
-    [Header("Propeller Sound")]
-    [SerializeField] private AudioSource _propellerSource;    // for drone humming
-    [SerializeField] private AudioClip _propellerHumClip;     // continuous propeller sound
-    [SerializeField] private float _propellerBaseVolume = 0.5f;
-    [SerializeField] private float _propellerPitchMin = 0.8f;
-    [SerializeField] private float _propellerPitchMax = 1.2f;
-    [SerializeField] private float _humFadeSpeed = 1.5f;      // speed for fading volume in/out
-
     [Header("Signal Audio")]
     [SerializeField] private AudioSource _signalSource;       // for continuous signals
     [SerializeField] private AudioClip _landingBeepClip;      // constant landing beep
 
     [Header("One-Shot Audio")]
     [SerializeField] private AudioSource _oneShotSource;      // for notification sounds
-    [SerializeField] private AudioClip _gestureAcceptClip;
-    [SerializeField] private AudioClip _lowConfidenceClip;
-    [SerializeField] private AudioClip _mediumConfidenceClip;
-    [SerializeField] private AudioClip _abortClip;
-    [SerializeField] private AudioClip _successClip;
-    [SerializeField] private AudioClip _rejectClip;
-
-    [Header("Spatial Audio Settings")]
-    [Tooltip("Minimum distance before sound starts to attenuate")]
-    [SerializeField] private float _minDistance = 1f;
-    [Tooltip("Maximum distance where sound reaches minimum volume")]
-    [SerializeField] private float _maxDistance = 30f;
-    [Tooltip("How much the Doppler effect affects pitch")]
-    [Range(0f, 5f)]
-    [SerializeField] private float _dopplerLevel = 1f;
-    [Tooltip("How directional the sound is (0=omnidirectional, 360=highly directional)")]
-    [Range(0f, 360f)]
-    [SerializeField] private float _spread = 120f;
-    [Tooltip("Volume multiplier for reverb zones")]
-    [Range(0f, 1.1f)]
-    [SerializeField] private float _reverbZoneMix = 1.0f;
+    [SerializeField] private AudioClip ConfirmClip;
+    [SerializeField] private AudioClip UncertaintyClip;
+    [SerializeField] private AudioClip PromptGuideClip;
+    [SerializeField] private AudioClip AbortClip;
+    [SerializeField] private AudioClip SuccessClip;
+    [SerializeField] private AudioClip FalseClip;
 
     // HMI state enumeration
     public enum HMIState { Idle, Uncertain, PromptConfirm, PromptGuide, Landing, Abort, Success, Reject }
     private HMIState _currentState;
 
     // Internal sound management
-    private bool _propellersActive = false;
-    private float _targetPropellerVolume = 0f;
-    private float _currentPropellerVolume = 0f;
-    private float _targetPropellerPitch = 1f;
+    // (Propeller sound logic removed; now handled by DroneRotorController)
+
+    public event Action OnSoundComplete;
+    public event Action OnAnimationComplete;
 
     private void Awake()
     {
-        // If a propeller source wasn't assigned, try to create one
-        if (_propellerSource == null)
-        {
-            // Look for existing propeller audio source
-            _propellerSource = GetComponents<AudioSource>()
-                .FirstOrDefault(source => source.name == "PropellerSource");
-            
-            // If not found, create a new audio source
-            if (_propellerSource == null)
-            {
-                _propellerSource = gameObject.AddComponent<AudioSource>();
-                _propellerSource.name = "PropellerSource";
-                
-                // Configure for 3D spatial audio
-                ConfigureSpatialAudio(_propellerSource);
-                
-                _propellerSource.loop = true;
-                _propellerSource.playOnAwake = false;
-                _propellerSource.volume = 0;
-                Debug.Log("Created propeller audio source");
-            }
-        }
-        else
-        {
-            // Configure existing audio source with spatial settings
-            ConfigureSpatialAudio(_propellerSource);
-        }
-        
-        // Also configure signal source if present
+        // Configure spatial audio for signal and one-shot sources
         if (_signalSource != null)
-        {
-            ConfigureSpatialAudio(_signalSource);
-        }
-        
-        // Configure one-shot source with less strong spatial effects
+            SpatialAudioHelper.Configure(_signalSource);
         if (_oneShotSource != null)
-        {
-            ConfigureSpatialAudio(_oneShotSource, 0.8f);
-        }
+            SpatialAudioHelper.Configure(_oneShotSource, 0.8f); // slightly less spatial
     }
 
     private void Update()
     {
         // Handle propeller sound volume and pitch adjustments
-        if (_propellerSource != null)
-        {
-            // Smoothly adjust volume
-            if (_currentPropellerVolume != _targetPropellerVolume)
-            {
-                _currentPropellerVolume = Mathf.MoveTowards(
-                    _currentPropellerVolume, 
-                    _targetPropellerVolume, 
-                    _humFadeSpeed * Time.deltaTime);
-                
-                _propellerSource.volume = _currentPropellerVolume;
-                
-                // Start or stop the audio based on volume
-                if (_currentPropellerVolume <= 0.01f && _propellerSource.isPlaying)
-                {
-                    _propellerSource.Stop();
-                }
-                else if (_currentPropellerVolume > 0.01f && !_propellerSource.isPlaying && _propellerHumClip != null)
-                {
-                    _propellerSource.clip = _propellerHumClip;
-                    _propellerSource.Play();
-                }
-            }
-            
-            // Smoothly adjust pitch when active
-            if (_propellerSource.isPlaying && _propellerSource.pitch != _targetPropellerPitch)
-            {
-                _propellerSource.pitch = Mathf.Lerp(
-                    _propellerSource.pitch, 
-                    _targetPropellerPitch, 
-                    Time.deltaTime * 2f);
-            }
-        }
+        // (Propeller sound logic removed; now handled by DroneRotorController)
     }
 
     /// <summary>
     /// Transition the HMI to the given state: play animations and audio accordingly.
+    /// Optionally wait for completion and fire events.
     /// </summary>
-    public void SetStatus(HMIState newState)
+    public void SetStatus(HMIState newState, bool waitForCompletion = false)
     {
         if (_currentState == newState)
             return;
@@ -147,8 +60,6 @@ public class DroneHMI : MonoBehaviour
         {
             _signalSource.Stop();
         }
-        
-        // Stop any one-shot (no direct stop API, but leaving pending)
 
         // Trigger LED animation state
         if (_ledAnimator != null)
@@ -160,101 +71,86 @@ public class DroneHMI : MonoBehaviour
             _ledAnimator.ResetTrigger("Landing");
             _ledAnimator.ResetTrigger("Abort");
             _ledAnimator.ResetTrigger("Success");
+            _ledAnimator.ResetTrigger("Reject");
 
+            string trigger = null;
+            AudioClip clip = null;
             switch (newState)
             {
                 case HMIState.Idle:
-                    _ledAnimator.SetTrigger("Idle");
+                    trigger = "Idle";
                     break;
                 case HMIState.Uncertain:
-                    _ledAnimator.SetTrigger("Uncertain");
-                    PlayOneShot(_lowConfidenceClip);
+                    trigger = "Uncertain";
+                    clip = UncertaintyClip;
                     break;
                 case HMIState.PromptConfirm:
-                    _ledAnimator.SetTrigger("PromptConfirm");
-                    PlayOneShot(_gestureAcceptClip);
+                    trigger = "PromptConfirm";
+                    clip = ConfirmClip;
                     break;
                 case HMIState.PromptGuide:
-                    _ledAnimator.SetTrigger("PromptGuide");
-                    PlayOneShot(_mediumConfidenceClip);
+                    trigger = "PromptGuide";
+                    clip = PromptGuideClip;
                     break;
                 case HMIState.Landing:
-                    _ledAnimator.SetTrigger("Landing");
-                    PlayOneShot(_lowConfidenceClip);
+                    trigger = "Landing";
+                    clip = UncertaintyClip;
                     break;
                 case HMIState.Abort:
-                    _ledAnimator.SetTrigger("Abort");
-                    PlayOneShot(_abortClip);
+                    trigger = "Abort";
+                    clip = AbortClip;
                     break;
                 case HMIState.Success:
-                    _ledAnimator.SetTrigger("Success");
-                    PlayOneShot(_successClip);
+                    trigger = "Success";
+                    clip = SuccessClip;
                     break;
                 case HMIState.Reject:
-                    _ledAnimator.SetTrigger("Reject");
-                    PlayOneShot(_rejectClip);
+                    trigger = "Reject";
+                    clip = FalseClip;
                     break;
             }
+            if (trigger != null)
+                _ledAnimator.SetTrigger(trigger);
+            if (clip != null)
+                PlayOneShot(clip, waitForCompletion);
+            else if (waitForCompletion)
+                StartCoroutine(FakeAnimationWait(trigger));
         }
     }
 
     /// <summary>
-    /// Start propeller sound at normal speed
+    /// Safely play a one-shot sound, optionally wait for completion and fire event.
     /// </summary>
-    public void PlayHoverHum()
+    private void PlayOneShot(AudioClip clip, bool waitForCompletion = false)
     {
-        _propellersActive = true;
-        _targetPropellerVolume = _propellerBaseVolume;
-        _targetPropellerPitch = 1.0f;
-        
-        if (_propellerSource != null && _propellerHumClip != null && !_propellerSource.isPlaying)
+        if (_oneShotSource != null && clip != null)
         {
-            _propellerSource.clip = _propellerHumClip;
-            _propellerSource.loop = true;
-            _propellerSource.volume = 0f; // Start at 0 and fade in
-            _propellerSource.Play();
-            
-            Debug.Log("Started propeller sound");
+            _oneShotSource.PlayOneShot(clip);
+            if (waitForCompletion)
+                StartCoroutine(WaitForSoundToEnd(clip.length));
         }
-        else if (_propellerHumClip == null)
+        else if (waitForCompletion)
         {
-            Debug.LogWarning("No propeller hum clip assigned!");
+            // If no sound, still fire event after a short delay
+            StartCoroutine(FakeSoundWait());
         }
     }
 
-    /// <summary>
-    /// Fade out and stop propeller sound
-    /// </summary>
-    public void StopHoverHum()
+    private System.Collections.IEnumerator WaitForSoundToEnd(float duration)
     {
-        _propellersActive = false;
-        _targetPropellerVolume = 0f;
-        
-        Debug.Log("Stopping propeller sound");
+        yield return new WaitForSeconds(duration);
+        OnSoundComplete?.Invoke();
     }
-
-    /// <summary>
-    /// Set propeller sound pitch for speed variation
-    /// </summary>
-    public void SetPropellerPitch(float normalizedSpeed)
+    private System.Collections.IEnumerator FakeSoundWait()
     {
-        if (_propellersActive)
-        {
-            // Map 0-1 speed to pitch range
-            _targetPropellerPitch = Mathf.Lerp(_propellerPitchMin, _propellerPitchMax, normalizedSpeed);
-        }
+        yield return new WaitForSeconds(0.1f);
+        OnSoundComplete?.Invoke();
     }
-
-    /// <summary>
-    /// Set propeller sound volume (relative to base volume)
-    /// </summary>
-    public void SetPropellerVolume(float volumeFactor)
+    private System.Collections.IEnumerator FakeAnimationWait(string trigger)
     {
-        if (_propellersActive)
-        {
-            // Apply volume factor to the base volume
-            _targetPropellerVolume = _propellerBaseVolume * Mathf.Clamp(volumeFactor, 0f, 1.5f);
-        }
+        // If you want to wait for animation, you can use AnimatorStateInfo.length if needed
+        yield return new WaitForSeconds(0.5f);
+        OnAnimationComplete?.Invoke();
     }
 
     /// <summary>
@@ -289,55 +185,11 @@ public class DroneHMI : MonoBehaviour
     }
 
     /// <summary>
-    /// Safely play a one-shot sound
-    /// </summary>
-    private void PlayOneShot(AudioClip clip)
-    {
-        if (_oneShotSource != null && clip != null)
-        {
-            _oneShotSource.PlayOneShot(clip);
-        }
-    }
-
-    /// <summary>
     /// Play gesture accept sound
     /// </summary>
     public void PlayGestureAccept()
     {
-        PlayOneShot(_gestureAcceptClip);
-    }
-
-    /// <summary>
-    /// Configures an AudioSource with proper spatial audio settings
-    /// </summary>
-    private void ConfigureSpatialAudio(AudioSource source, float spatialBlendOverride = 1.0f)
-    {
-        if (source == null) return;
-        
-        // Full 3D spatialization
-        source.spatialBlend = spatialBlendOverride;
-        
-        // Distance attenuation
-        source.minDistance = _minDistance;
-        source.maxDistance = _maxDistance;
-        
-        // Use logarithmic rolloff for more realistic distance attenuation
-        source.rolloffMode = AudioRolloffMode.Logarithmic;
-        
-        // Doppler effect (pitch shift based on movement)
-        source.dopplerLevel = _dopplerLevel;
-        
-        // Sound spread (directional vs. omnidirectional)
-        source.spread = _spread;
-        
-        // Reverb mix
-        source.reverbZoneMix = _reverbZoneMix;
-        
-        // For more realism, also enable Air Absorption which reduces high frequencies at distance
-        source.SetCustomCurve(
-            AudioSourceCurveType.ReverbZoneMix,
-            AnimationCurve.EaseInOut(0f, 1f, 1f, 0.1f)
-        );
+        PlayOneShot(ConfirmClip);
     }
 
     // TODO: Implement drone HMI logic

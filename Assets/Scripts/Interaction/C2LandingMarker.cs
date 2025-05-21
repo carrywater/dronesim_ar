@@ -1,12 +1,13 @@
 using UnityEngine;
 using Oculus.Interaction.HandGrab;
 using Oculus.Interaction;
+using Utils;
 
 public class C2LandingMarker : MonoBehaviour
 {
     [Header("References")]
     public PlaneReticleDataIcon reticleDataIcon; // Assign in Inspector
-    public Transform landingMarker; // Assign in Inspector
+    public TargetPositioner targetPositioner; // Assign in Inspector
 
     private DistanceHandGrabInteractable _interactable;
 
@@ -24,11 +25,11 @@ public class C2LandingMarker : MonoBehaviour
         // Check for select (grab/pinch) event
         if (evt.Type == PointerEventType.Select)
         {
-            if (reticleDataIcon != null && landingMarker != null)
+            if (reticleDataIcon != null && targetPositioner != null)
             {
                 Vector3 markPosition = reticleDataIcon.transform.position;
-                landingMarker.position = markPosition;
-                Debug.Log($"[C2LandingMarker] Landing marker moved to: {markPosition}");
+                targetPositioner.SetTargetPosition("c2_target", markPosition);
+                Debug.Log($"[C2LandingMarker] Landing marker set via TargetPositioner: {markPosition}");
             }
         }
     }
