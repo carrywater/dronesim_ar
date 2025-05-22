@@ -1,1 +1,0 @@
-public enum Role { Unknown, Recipient, Bystander } 

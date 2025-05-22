@@ -1,5 +1,5 @@
 using UnityEngine;
-
+using Interaction;
 public class ThumbCueLookAtHMD : MonoBehaviour
 {
     [Header("Reference to the HMD (center eye)")]

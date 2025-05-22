@@ -1,85 +1,62 @@
 using System;
-using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using Utils;
+using Visualization;
+using Interaction;
 
 /// <summary>
-/// Manages AR cues and user interaction logic (gestures, confirmations).
-/// Shows/hides cues as needed for the current scenario.
-/// Never manages targets directly—just shows/hides cues relative to the active target.
+/// Manages AR cues and user interaction logic in a scenario-agnostic way.
 /// </summary>
 public class InteractionManager : MonoBehaviour
 {
-    [Header("Cue References (under Active Target)")]
-    [SerializeField] private GameObject ringCue;
-    [SerializeField] private GameObject thumbsCue;
-    [SerializeField] private GameObject thumbUpCue;
-    [SerializeField] private GameObject thumbDownCue;
-    [SerializeField] private GenericGestureHandler gestureHandler;
+    [Header("Cue References")]
+    [Tooltip("Register all cues by name here (e.g., 'Thumbs', 'Ring', 'Marker', etc.)")]
+    [SerializeField] private List<GameObject> _cues;
 
-    [Header("Debug/Startup")]
-    [Tooltip("Show cues at startup for debugging/demo")]
-    [SerializeField] private bool _showCuesAtStartup = false;
+    [Header("Interaction Handlers")]
+    [Tooltip("Register all interaction handlers by type (e.g., 'point', 'confirm', etc.)")]
+    [SerializeField] private List<MonoBehaviour> _interactionHandlers; // e.g., PointGestureHandler, ConfirmGestureHandler
 
-    // Completion flags for scenario manager
-    public bool IsGestureConfirmed { get; private set; } = false;
-    public bool IsGestureRejected { get; private set; } = false;
+    private Dictionary<string, GameObject> _cueDict;
+    private Dictionary<string, MonoBehaviour> _handlerDict;
 
-    private Coroutine _activeCoroutine;
+    public bool IsInteractionComplete { get; private set; }
+    public event Action OnInteractionComplete;
 
     private void Awake()
     {
-        if (_showCuesAtStartup)
+        _cueDict = new Dictionary<string, GameObject>();
+        foreach (var cue in _cues)
         {
-            ShowCue("thumbs");
+            if (cue != null)
+                _cueDict[cue.name] = cue;
         }
-        else
+        _handlerDict = new Dictionary<string, MonoBehaviour>();
+        foreach (var handler in _interactionHandlers)
         {
-            HideAllCues();
+            if (handler != null)
+                _handlerDict[handler.GetType().Name.ToLower()] = handler;
         }
-    }
-
-    private void OnEnable()
-    {
-        if (!_showCuesAtStartup)
-            HideAllCues();
-        if (gestureHandler != null)
-        {
-            gestureHandler.OnConfirm += HandleGestureConfirm;
-            gestureHandler.OnReject += HandleGestureReject;
-        }
-    }
-
-    private void OnDisable()
-    {
-        if (gestureHandler != null)
-        {
-            gestureHandler.OnConfirm -= HandleGestureConfirm;
-            gestureHandler.OnReject -= HandleGestureReject;
-        }
+        HideAllCues();
     }
 
     /// <summary>
-    /// Show a specific cue by name (e.g., "ring", "thumbs", "thumbUp", "thumbDown")
+    /// Show a cue by name (e.g., 'Thumbs', 'Ring', 'Marker')
     /// </summary>
     public void ShowCue(string cueName)
     {
-        HideAllCues();
-        switch (cueName.ToLower())
-        {
-            case "ring":
-                if (ringCue != null) ringCue.SetActive(true);
-                break;
-            case "thumbs":
-                if (thumbsCue != null) thumbsCue.SetActive(true);
-                break;
-            case "thumbup":
-                if (thumbUpCue != null) thumbUpCue.SetActive(true);
-                break;
-            case "thumbdown":
-                if (thumbDownCue != null) thumbDownCue.SetActive(true);
-                break;
-        }
+        if (_cueDict.TryGetValue(cueName, out var cue))
+            cue.SetActive(true);
+    }
+
+    /// <summary>
+    /// Hide a cue by name
+    /// </summary>
+    public void HideCue(string cueName)
+    {
+        if (_cueDict.TryGetValue(cueName, out var cue))
+            cue.SetActive(false);
     }
 
     /// <summary>
@@ -87,32 +64,60 @@ public class InteractionManager : MonoBehaviour
     /// </summary>
     public void HideAllCues()
     {
-        if (ringCue != null) ringCue.SetActive(false);
-        if (thumbsCue != null) thumbsCue.SetActive(false);
-        if (thumbUpCue != null) thumbUpCue.SetActive(false);
-        if (thumbDownCue != null) thumbDownCue.SetActive(false);
+        foreach (var cue in _cueDict.Values)
+            cue.SetActive(false);
     }
 
     /// <summary>
-    /// Handle user input (gesture confirmation/rejection)
+    /// Start an interaction by type (e.g., 'point', 'confirm')
     /// </summary>
-    public void HandleUserInput()
+    public void StartInteraction(string interactionType)
     {
-        // This can be expanded for more complex input handling
-        // For now, just a placeholder
+        IsInteractionComplete = false;
+        interactionType = interactionType.ToLower();
+        if (_handlerDict.TryGetValue(interactionType, out var handler))
+        {
+            if (handler is PointGestureHandler pointHandler)
+            {
+                pointHandler.SetActive(true);
+                pointHandler.OnThumbsUp += CompleteInteraction;
+                pointHandler.OnThumbsDown += CompleteInteraction;
+            }
+            else if (handler is ConfirmGestureHandler confirmHandler)
+            {
+                confirmHandler.OnTargetPlaced += CompleteInteraction;
+                confirmHandler.EnableInteraction();
+            }
+            // Add more handler types as needed
+        }
     }
 
-    private void HandleGestureConfirm()
+    /// <summary>
+    /// Stop an interaction by type (optional)
+    /// </summary>
+    public void StopInteraction(string interactionType)
     {
-        IsGestureConfirmed = true;
-        IsGestureRejected = false;
-        HideAllCues();
+        interactionType = interactionType.ToLower();
+        if (_handlerDict.TryGetValue(interactionType, out var handler))
+        {
+            if (handler is PointGestureHandler pointHandler)
+            {
+                pointHandler.SetActive(false);
+                pointHandler.OnThumbsUp -= CompleteInteraction;
+                pointHandler.OnThumbsDown -= CompleteInteraction;
+            }
+            else if (handler is ConfirmGestureHandler confirmHandler)
+            {
+                confirmHandler.OnTargetPlaced -= CompleteInteraction;
+                confirmHandler.DisableInteraction();
+            }
+            // Add more handler types as needed
+        }
     }
 
-    private void HandleGestureReject()
+    private void CompleteInteraction()
     {
-        IsGestureConfirmed = false;
-        IsGestureRejected = true;
-        HideAllCues();
+        IsInteractionComplete = true;
+        OnInteractionComplete?.Invoke();
     }
 } 

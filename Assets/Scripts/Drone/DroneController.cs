@@ -2,6 +2,7 @@ using UnityEngine;
 using System;
 using System.Collections;
 using System.Linq;
+using Utils;
 
 /// <summary>
 /// Core drone controller that manages both flight states and movement execution.
@@ -40,10 +41,6 @@ public class DroneController : MonoBehaviour
     [SerializeField] private float _accelerationTime = 0.5f;
     [Range(0.1f, 2f)]
     [SerializeField] private float _decelerationTime = 0.8f;
-    [Range(0.05f, 0.5f)]
-    [SerializeField] private float _arrivalThreshold = 0.1f;
-    [Range(0.05f, 0.5f)]
-    [SerializeField] private float _speedThreshold = 0.1f;
 
     [Header("References")]
     [SerializeField] private Transform _droneOffset;
@@ -55,14 +52,15 @@ public class DroneController : MonoBehaviour
     /// </summary>
     public enum FlightState 
     { 
-        Idle,           // Motors off, on ground
-        Spawning,       // Initial positioning
-        Hover,          // Steady hover at hover height
-        Cruising,       // Moving horizontally
-        Descending,     // Moving downward for landing
-        LandingAbort,   // Returning to hover after landing abort
-        Aborting,       // Emergency abort (rising and despawning)
-        Despawning      // Final cleanup before destruction
+        Idle,
+        Spawning,
+        Hover,
+        HoveringAtPosition,
+        Cruising,
+        Descending,
+        LandingAbort,
+        Aborting,
+        Despawning
     }
     
     // Current state
@@ -87,7 +85,7 @@ public class DroneController : MonoBehaviour
     #endregion
     
     #region Unity Lifecycle Methods
-    
+
     private void Awake()
     {
         ValidateComponents();
@@ -96,11 +94,14 @@ public class DroneController : MonoBehaviour
     private void Update()
     {
         if (!_isMoving || _droneOffset == null) return;
-        
-        // Execute movement based on target position
+        // Check for movement taking too long
+        if (!_moveTakingLong && (Time.time - _moveStartTime) > (_expectedMoveTime * 1.5f))
+        {
+            _moveTakingLong = true;
+            Debug.LogWarning($"[DroneController] Movement taking longer than expected! State={_currentState}, elapsed={Time.time - _moveStartTime:F2}s, expected={_expectedMoveTime:F2}s");
+        }
+        Debug.Log($"[DroneController] Update: state={_currentState}, _droneOffset.localPosition={_droneOffset.localPosition}, _targetPosition={_targetPosition}, _isMoving={_isMoving}");
         UpdateMovement();
-        
-        // Check if we've reached the target
         CheckMovementCompletion();
     }
     
@@ -149,24 +150,36 @@ public class DroneController : MonoBehaviour
     /// <summary>
     /// Start drone in idle state at the specified position
     /// </summary>
-    public void SpawnAt(Vector3 position)
+    public void SpawnAt(Vector3 worldPosition, float initialOffsetY)
     {
+        Debug.Log($"[DroneController] SpawnAt CALLED: worldPosition={worldPosition}, initialOffsetY={initialOffsetY}, isInitialized={_isInitialized}, isMoving={_isMoving}");
         if (!_isInitialized)
         {
             Debug.LogError("DroneController: Cannot spawn drone - not initialized!");
             return;
         }
-        
         if (_isMoving)
         {
             Debug.LogWarning("DroneController: Cannot spawn while moving");
             return;
         }
-        
-        // Set initial position
-        SetPosition(position);
-        
+        // Set root position (X, 0, Z)
+        transform.position = new Vector3(worldPosition.x, 0f, worldPosition.z);
+        Debug.Log($"[DroneController] SpawnAt: root pos = {transform.position}");
+        // Set offset Y
+        if (_droneOffset != null)
+        {
+            var local = _droneOffset.localPosition;
+            local.y = initialOffsetY;
+            _droneOffset.localPosition = local;
+            Debug.Log($"[DroneController] SpawnAt: offset Y = {_droneOffset.localPosition.y}");
+        }
+        else
+        {
+            Debug.LogError("[DroneController] SpawnAt: _droneOffset is null!");
+        }
         // Transition to Spawning state
+        Debug.Log($"[DroneController] SpawnAt: Transitioning to Spawning");
         TransitionToState(FlightState.Spawning);
     }
 
@@ -175,33 +188,33 @@ public class DroneController : MonoBehaviour
     /// </summary>
     public void TransitionToHover()
     {
+        Debug.Log($"[DroneController] TransitionToHover CALLED: currentState={_currentState}, hoverHeight={_hoverHeight}");
         if (!IsValidTransition(FlightState.Hover))
         {
             Debug.LogWarning($"DroneController: Invalid transition from {_currentState} to Hover");
             return;
         }
-        
-        Vector3 currentPos = _droneOffset.localPosition;
-        _targetPosition = new Vector3(currentPos.x, _hoverHeight, currentPos.z);
-        
+        Vector3 currentLocal = _droneOffset.localPosition;
+        _targetPosition = new Vector3(currentLocal.x, _hoverHeight, currentLocal.z);
+        Debug.Log($"[DroneController] TransitionToHover: targetPosition={_targetPosition}, currentLocal={currentLocal}");
         TransitionToState(FlightState.Hover);
         StartMovement();
     }
-    
+
     /// <summary>
     /// Start cruising to a target position
     /// </summary>
     public void TransitionToCruise(Vector3 targetPosition)
     {
+        Debug.Log($"[DroneController] TransitionToCruise CALLED: currentState={_currentState}, targetPosition={targetPosition}");
         if (!IsValidTransition(FlightState.Cruising))
         {
             Debug.LogWarning($"DroneController: Invalid transition from {_currentState} to Cruising");
             return;
         }
-        
         Vector3 localPosition = transform.InverseTransformPoint(targetPosition);
         _targetPosition = new Vector3(localPosition.x, _hoverHeight, localPosition.z);
-        
+        Debug.Log($"[DroneController] TransitionToCruise: _targetPosition={_targetPosition}, localPosition={localPosition}");
         TransitionToState(FlightState.Cruising);
         StartMovement();
     }
@@ -211,31 +224,40 @@ public class DroneController : MonoBehaviour
     /// </summary>
     public void TransitionToLanding(Vector3 landingPosition)
     {
+        Debug.Log($"[DroneController] TransitionToLanding CALLED: currentState={_currentState}, landingPosition={landingPosition}");
         if (!IsValidTransition(FlightState.Descending))
         {
             Debug.LogWarning($"DroneController: Invalid transition from {_currentState} to Descending");
             return;
         }
-        
         Vector3 localPosition = transform.InverseTransformPoint(landingPosition);
-        // First align horizontally with landing spot
         Vector3 horizontalTarget = new Vector3(localPosition.x, _droneOffset.localPosition.y, localPosition.z);
-        _targetPosition = horizontalTarget;
-        
+            _targetPosition = horizontalTarget;
+        Debug.Log($"[DroneController] TransitionToLanding: horizontalTarget={horizontalTarget}, localPosition={localPosition}");
         TransitionToState(FlightState.Descending);
         StartMovement();
-        
-        // When horizontal alignment is complete, begin descent
-        StartCoroutine(SequentialMovement(
-            () => IsAtTargetPosition(horizontalTarget, 0.1f), 
-            () => 
-            {
-                _targetPosition = new Vector3(localPosition.x, 0.1f, localPosition.z);
-                StartMovement();
-            }
-        ));
+        var horizontalCheck = new PositionValidator.AxisCheck { checkY = false, threshold = 0.05f };
+        // If already at horizontal target, start descent immediately
+        if (PositionValidator.IsAtPosition(_droneOffset, horizontalTarget, horizontalCheck))
+        {
+            _targetPosition = new Vector3(localPosition.x, 0.1f, localPosition.z);
+            Debug.Log($"[DroneController] TransitionToLanding: Already aligned, begin descent to {_targetPosition}");
+            StartMovement();
+        }
+        else
+        {
+            StartCoroutine(SequentialMovement(
+                () => PositionValidator.IsAtPosition(_droneOffset, horizontalTarget, horizontalCheck),
+                () =>
+                {
+                    _targetPosition = new Vector3(localPosition.x, 0.1f, localPosition.z);
+                    Debug.Log($"[DroneController] TransitionToLanding: Begin descent to {_targetPosition}");
+                    StartMovement();
+                }
+            ));
+        }
     }
-
+    
     /// <summary>
     /// Abort landing and return to hover
     /// </summary>
@@ -259,15 +281,15 @@ public class DroneController : MonoBehaviour
     /// </summary>
     public void TransitionToAbort()
     {
+        Debug.Log($"[DroneController] TransitionToAbort CALLED: currentState={_currentState}, abortHeight={_abortHeight}");
         if (!IsValidTransition(FlightState.Aborting))
         {
             Debug.LogWarning($"DroneController: Invalid transition from {_currentState} to Aborting");
             return;
         }
-        
         Vector3 currentPos = _droneOffset.localPosition;
         _targetPosition = new Vector3(currentPos.x, _abortHeight, currentPos.z);
-        
+        Debug.Log($"[DroneController] TransitionToAbort: _targetPosition={_targetPosition}, currentPos={currentPos}");
         TransitionToState(FlightState.Aborting);
         StartMovement();
     }
@@ -292,18 +314,6 @@ public class DroneController : MonoBehaviour
     #region Movement Methods
     
     /// <summary>
-    /// Set the drone's position immediately (for initialization)
-    /// </summary>
-    public void SetPosition(Vector3 worldPosition)
-    {
-        Vector3 localPosition = transform.InverseTransformPoint(worldPosition);
-        _droneOffset.localPosition = localPosition;
-        _targetPosition = localPosition;
-        _currentVelocity = Vector3.zero;
-        _isMoving = false;
-    }
-    
-    /// <summary>
     /// Stop all movement immediately
     /// </summary>
     public void StopMovement()
@@ -311,24 +321,15 @@ public class DroneController : MonoBehaviour
         _isMoving = false;
         _currentVelocity = Vector3.zero;
     }
-    
+
     /// <summary>
-    /// Check if we have arrived at the target position and are no longer moving
+    /// Check if movement is complete
     /// </summary>
     public bool IsMovementComplete()
     {
         return !_isMoving;
     }
-    
-    /// <summary>
-    /// Check if we're at the target position
-    /// </summary>
-    public bool IsAtTargetPosition(Vector3 target, float threshold = 0.1f)
-    {
-        if (_droneOffset == null) return false;
-        return Vector3.Distance(_droneOffset.localPosition, target) < threshold;
-    }
-    
+
     /// <summary>
     /// Get the current local position
     /// </summary>
@@ -383,106 +384,133 @@ public class DroneController : MonoBehaviour
         {
             case FlightState.Idle:
                 return targetState == FlightState.Spawning;
-                
             case FlightState.Spawning:
                 return targetState == FlightState.Hover || targetState == FlightState.Aborting;
-                
             case FlightState.Hover:
                 return targetState == FlightState.Cruising || 
                        targetState == FlightState.Descending || 
                        targetState == FlightState.Aborting;
-                
             case FlightState.Cruising:
                 return targetState == FlightState.Hover || 
+                       targetState == FlightState.HoveringAtPosition ||
                        targetState == FlightState.Descending || 
                        targetState == FlightState.Aborting;
-                
+            case FlightState.HoveringAtPosition:
+                return targetState == FlightState.Hover ||
+                       targetState == FlightState.Aborting;
             case FlightState.Descending:
                 return targetState == FlightState.LandingAbort || 
                        targetState == FlightState.Idle || 
                        targetState == FlightState.Aborting;
-                
             case FlightState.LandingAbort:
                 return targetState == FlightState.Hover || 
                        targetState == FlightState.Aborting;
-                
             case FlightState.Aborting:
                 return targetState == FlightState.Despawning;
-                
             case FlightState.Despawning:
                 return false; // No valid transitions from despawning
-                
             default:
                 return false;
         }
     }
     
+    private float _moveStartTime = 0f;
+    private float _expectedMoveTime = 0f;
+    private bool _moveTakingLong = false;
+
     private void StartMovement()
     {
         _isMoving = true;
-        
-        // Calculate smooth time based on movement type and distance
         float distance = Vector3.Distance(_droneOffset.localPosition, _targetPosition);
         float speed = GetSpeedForState(_currentState);
         float smoothTime = CalculateSmoothTime(distance, speed);
-        
-        Debug.Log($"Starting movement to {_targetPosition}, distance: {distance:F2}m, speed: {speed:F2}m/s, smooth time: {smoothTime:F2}s");
+        _moveStartTime = Time.time;
+        _expectedMoveTime = distance / Mathf.Max(speed, 0.01f); // avoid div by zero
+        _moveTakingLong = false;
+        Debug.Log($"[DroneController] StartMovement: state={_currentState}, from={_droneOffset.localPosition}, to={_targetPosition}, distance={distance}, speed={speed}, smoothTime={smoothTime}, isMoving={_isMoving}");
     }
     
     private void UpdateMovement()
     {
-        // Calculate smooth time based on current parameters
-        float smoothTime = CalculateSmoothTime(
-            Vector3.Distance(_droneOffset.localPosition, _targetPosition),
-            GetSpeedForState(_currentState)
-        );
-        
-        // Update position with smoothing
-        _droneOffset.localPosition = Vector3.SmoothDamp(
-            _droneOffset.localPosition,
-            _targetPosition,
-            ref _currentVelocity,
-            smoothTime
-        );
+        // Use a fixed, realistic smoothTime for vertical moves (Hover/Abort), e.g., 0.6s
+        float smoothTime = 0.6f;
+        if (_currentState == FlightState.Cruising)
+            smoothTime = 0.4f; // horizontal moves can be a bit snappier
+        else if (_currentState == FlightState.Descending)
+            smoothTime = 0.8f; // landing is slower
+
+        float snapThreshold = 0.07f; // 7cm, realistic for a drone
+        float stopVelocity = 0.03f;  // 3cm/s, realistic for a drone
+        float dist = Vector3.Distance(_droneOffset.localPosition, _targetPosition);
+        if (dist < snapThreshold && _currentVelocity.magnitude < stopVelocity)
+        {
+            _droneOffset.localPosition = _targetPosition;
+            _currentVelocity = Vector3.zero;
+            Debug.Log("[DroneController] UpdateMovement: Snapped to target (realistic)");
+        }
+        else
+        {
+            _droneOffset.localPosition = Vector3.SmoothDamp(
+                _droneOffset.localPosition,
+                _targetPosition,
+                ref _currentVelocity,
+                smoothTime
+            );
+        }
+        Debug.Log($"[DroneController] UpdateMovement: new _droneOffset.localPosition={_droneOffset.localPosition}");
     }
     
     private void CheckMovementCompletion()
     {
-        // Calculate distance to target and current speed
-        float distanceToTarget = Vector3.Distance(_droneOffset.localPosition, _targetPosition);
-        float currentSpeed = _currentVelocity.magnitude;
-        
-        // Consider movement complete if we're close enough AND moving slowly enough
-        if (distanceToTarget <= _arrivalThreshold && currentSpeed <= _speedThreshold)
+        var axisCheck = new PositionValidator.AxisCheck();
+        switch (_currentState)
+        {
+            case FlightState.Spawning:
+                axisCheck.checkX = false;
+                axisCheck.checkZ = false;
+                break;
+            case FlightState.Hover:
+            case FlightState.Aborting:
+                axisCheck.checkX = false;
+                axisCheck.checkZ = false;
+                break;
+            case FlightState.Cruising:
+                axisCheck.checkY = false;
+                break;
+            case FlightState.Descending:
+                break;
+        }
+        bool atTarget = PositionValidator.IsAtPosition(_droneOffset, _targetPosition, axisCheck);
+        bool stopped = _currentVelocity.magnitude < 0.02f; // Allow for subtle PID jitter
+        Debug.Log($"[DroneController] CheckMovementCompletion: state={_currentState}, atTarget={atTarget}, stopped={stopped}, _droneOffset.localPosition={_droneOffset.localPosition}, _targetPosition={_targetPosition}, velocity={_currentVelocity}");
+        if (atTarget && stopped)
         {
             _isMoving = false;
             OnStateComplete?.Invoke(_currentState);
-            
-            // Handle state-specific completion
             switch (_currentState)
             {
                 case FlightState.Spawning:
-                    TransitionToState(FlightState.Hover);
+                    Debug.Log("[DroneController] CheckMovementCompletion: Transitioning to Hover");
+        TransitionToState(FlightState.Hover);
                     break;
-                    
                 case FlightState.Cruising:
+                    Debug.Log("[DroneController] CheckMovementCompletion: Transitioning to Hover");
                     TransitionToState(FlightState.Hover);
                     break;
-                    
                 case FlightState.Descending:
+                    Debug.Log("[DroneController] CheckMovementCompletion: Transitioning to Idle");
                     TransitionToState(FlightState.Idle);
                     break;
-                    
                 case FlightState.LandingAbort:
+                    Debug.Log("[DroneController] CheckMovementCompletion: Transitioning to Hover");
                     TransitionToState(FlightState.Hover);
                     break;
-                    
                 case FlightState.Aborting:
+                    Debug.Log("[DroneController] CheckMovementCompletion: Transitioning to Despawning");
                     TransitionToState(FlightState.Despawning);
                     break;
             }
-            
-            Debug.Log($"Movement complete: {_currentState}, position: {_droneOffset.localPosition:F2}");
+            Debug.Log($"[DroneController] Movement complete: {_currentState}, position: {_droneOffset.localPosition:F2}");
         }
     }
     
@@ -543,29 +571,67 @@ public class DroneController : MonoBehaviour
     }
     
     #endregion
-}
 
-[System.Serializable]
-public class LegConfig
-{
-    [Tooltip("Enable this leg for animation")] public bool enabled = false;
-    public Transform legTransform;
-    [Tooltip("Which axis to rotate around (X = Red, Y = Green, Z = Blue)")]
-    public enum RotationAxis { X, Y, Z }
-    public RotationAxis rotationAxis = RotationAxis.X;
-    [Tooltip("Angle to rotate when extended (positive = clockwise, negative = counter-clockwise)")]
-    [Range(-90f, 90f)]
-    public float extendedAngle = -30f;
-    [Tooltip("Whether to invert the rotation direction")]
-    public bool invertDirection = false;
-    public Vector3 GetRotationAxisVector()
+    public float AbortHeight => _abortHeight;
+    public float HoverHeight => _hoverHeight;
+    public float HoverSpeed => _hoverSpeed;
+    public float CruiseSpeed => _cruiseSpeed;
+    public float LandingSpeed => _landingSpeed;
+    public float AbortSpeed => _abortSpeed;
+    public float AccelerationTime => _accelerationTime;
+    public float DecelerationTime => _decelerationTime;
+    public bool IsInitialized => _isInitialized;
+
+    public void MoveTo(Vector3 worldPosition, float offsetY)
     {
-        switch (rotationAxis)
+        Debug.Log($"[DroneController] MoveTo CALLED: worldPosition={worldPosition}, offsetY={offsetY}");
+        transform.position = new Vector3(worldPosition.x, 0f, worldPosition.z);
+        Debug.Log($"[DroneController] MoveTo: root pos = {transform.position}");
+        if (_droneOffset != null)
         {
-            case RotationAxis.X: return Vector3.right;
-            case RotationAxis.Y: return Vector3.up;
-            case RotationAxis.Z: return Vector3.forward;
-            default: return Vector3.right;
+            var local = _droneOffset.localPosition;
+            local.y = offsetY;
+            _droneOffset.localPosition = local;
+            Debug.Log($"[DroneController] MoveTo: offset Y = {_droneOffset.localPosition.y}");
         }
+        else
+        {
+            Debug.LogError("[DroneController] MoveTo: _droneOffset is null!");
+        }
+    }
+
+    // Add this property for clean access to the offset
+    public Transform DroneOffset => _droneOffset;
+    
+    /// <summary>
+    /// Hover at a specific position for a duration
+    /// </summary>
+    public IEnumerator HoverAtPosition(Vector3 position, float duration)
+    {
+        Debug.Log($"[DroneController] HoverAtPosition CALLED: position={position}, duration={duration}");
+        if (!IsValidTransition(FlightState.HoveringAtPosition))
+        {
+            Debug.LogWarning($"DroneController: Invalid transition from {_currentState} to HoveringAtPosition");
+            yield break;
+        }
+
+        // First cruise to the position
+        Vector3 localPosition = transform.InverseTransformPoint(position);
+        _targetPosition = new Vector3(localPosition.x, _hoverHeight, localPosition.z);
+        TransitionToState(FlightState.Cruising);
+        StartMovement();
+
+        // Wait until we reach the position
+        var horizontalCheck = new PositionValidator.AxisCheck { checkY = false };
+        yield return new WaitUntil(() => PositionValidator.IsAtPosition(_droneOffset, _targetPosition, horizontalCheck));
+
+        // Now hover at this position
+        TransitionToState(FlightState.HoveringAtPosition);
+        
+        // Wait for the specified duration
+        yield return new WaitForSeconds(duration);
+
+        // Return to normal hover state
+        TransitionToState(FlightState.Hover);
     }
 }

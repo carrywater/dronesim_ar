@@ -1,6 +1,6 @@
 using UnityEngine;
 using Oculus.Interaction.DistanceReticles;
-
+using Interaction;
 public class PlaneReticleDataIcon : ReticleDataIcon
 {
     [Header("Plane Collider for Reticle Clamping")]

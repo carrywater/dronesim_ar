@@ -1,315 +1,207 @@
-**Project Definition: Human-Drone Interaction Study (Outdoor AR)**
+# Human-Drone Interaction Study (Outdoor AR) — Project README
 
 ---
 
-### 1. Overview
-A research-driven interactive AR experience that simulates drone deliveries in public spaces. The goal is to evaluate how human recipients respond to operational uncertainty in drone behavior, with both recipients and bystanders participating simultaneously in a synchronized mixed-reality environment.
+## 1. Overview
+
+This project is a research-driven AR experience simulating drone deliveries in public spaces, designed for Meta Quest headsets. The system evaluates human responses to drone behavior under uncertainty, supporting both recipients and bystanders in a synchronized, mixed-reality environment.
 
 ---
 
-### 2. Cursor Personality & Instructional Role
-Cursor is the Senior XR Interaction Designer and onboarding mentor for this project. All guidance and explanations from Cursor should follow this style:
+## 2. Codebase Organization
 
-Tone: Friendly, encouraging, and confident — like a senior walking a junior through design rationale.
-
-Style: Clear, concise, and grounded in UX best practices.
-
-Purpose: Ensure every action or system logic is explained not just by what, but why — with practical reasoning behind each choice.
-
-apply changes direclty to the relevant files under scripts
-
-#### Code Organization Rules
-- Keep code modular and single-responsibility focused
-- Use clear, descriptive naming that reflects the purpose
-- Add XML documentation for public methods and classes
-- Follow Unity's component-based architecture principles
-
-
-### 3. Core Components
-
-#### 3.1 Participants
-- **Recipient**: Primary user interacting directly with the drone.
-- **Bystander**: Secondary observer whose perspective and perception are also studied.
-- Both users are present in a real outdoor location and share a synchronized AR scene.
-
-#### 3.2 AR Hardware & SDKs
-- Devices: 2 Meta Quest headsets (with passthrough AR)
-- SDKs:
-  - Meta All-In-One SDK
-  - Unity Netcode for GameObjects (NGO)
-  - MR Utility Kit MRUK(for anchor sharing and scene setup)
-  - Meta XR Interaction ​SDK ( for interaction features)
-
-#### 3.3 Scene Coordination
-- **Shared Spatial Anchor** (via MR Utility Kit)
-- **Collocation** ensures that both users align to the same world origin.
-- Anchor will be manually oriented during setup to create a reliable forward-facing scene.
-
-*A concise architecture & coding guide for new contributors*  
-
----
-
-## 4 · Functional Project Goal  
-A reproducible mixed‑reality study (Meta Quest / URP) that spawns a drone over a **table** anchor in an **outdoor/open area**, flies toward the recipient while avoiding a bystander, hovers at 5–7 m, and branches into three **Involvement‑Level** scenarios: 
-
-| Level | Label | Behaviour at Hover |
-|-------|-------|--------------------|
-| `C‑0` | **High Autonomy – Abort** | Drone enters hover, flashes **yellow LED** and plays uncertainty tone. After ~5 s (confidence too low) it aborts and departs—no user input requested. | *(none)* | Drone climbs and flies away. | |
-| `C‑1` | **Medium – Confirm** | Drone hovers, signals uncertainty, and projects a **Landing Probe**: a vertical line from drone down to a proposed floor spot. | *Thumbs‑up* (right hand) = accept;  👎 *Thumbs‑down* = reject & propose new spot. Gestures detected via **Interaction SDK pose selectors**. | Accept → drone lands at the marked spot.<br>Reject → probe moves to new random spot; cycle repeats.|
-| `C‑2` | **High – Request Guidance** | Drone hovers, shows **Guidance Pad** – a circular zone directly beneath. | User points with index finger (☝️) and holds for **2 s** anywhere inside the pad; pointer reticle visible. | Drone lands at the indicated location.  |
-
-Gestures: **Thumbs‑up**, **Thumbs‑down**, **Point**, **Palm‑up (Stop)**.  
-Visual/audio HMI kept constant; only user agency changes.
-
----
-
-## 2 · User Roles (network‑safe)
-
-* **PlayerRig** auto‑spawns for each headset.  
-* First to join as host becomes the recipient (host)
-* Second user (client) auto‑assigned) → **Bystander**.  
-* Role stored in `NetworkVariable<Role>` so all peers agree instantly.
-
-```csharp
-public enum Role { Unknown, Recipient, Bystander }
-```
-
-| Role | Attached Collider | Layer | Purpose |
-|------|-------------------|-------|---------|
-| Recipient | Small trigger sphere (≈ 0.25 m) at head | `RecipientTarget` | Drone's destination |
-| Bystander | NavMeshObstacle sphere (≈ 0.6 m, Carve) | `BystanderObstacle` | Path‑avoidance |
-
-Colliders enable/disable themselves via **RoleColliders.cs** when the `role` variable changes—zero manual setup.
-
----
-
-## 3 · Folder Layout (scripts)
+All scripts are organized by responsibility and modularity:
 
 ```
 Scripts/
-  Core/         SessionManager, ScenarioManager
-  Spawning/     SpawnLocator, DroneSpawner
-  Drone/        DroneController, DroneNavigation, DroneHMI, PIDController, ARInterfaceManager
-  Interaction/  TriggerCube, RoleColliders ← gesture events handled by SDK unity selector event wrapper in scene
-  Utils/        LayerSetup
+  Core/           # Scenario orchestration and sequencing
+  Drone/          # Drone flight, HMI, and physical subsystems
+  Interaction/    # User gesture, cue, and AR interaction logic
+  Visualization/  # Spline/path visualization
+  Utils/          # General utilities (audio, target zones, etc.)
 ```
 
-## 3.1 · Zone Hierarchy & Responsibilities
+---
 
-Drone Prefab Hierarchy:
-```
-dronePrefab/
-  Drone Offset/           # Visual root: Rotors, Legs, Body, HMI (LED & audio)
-  Zone/
-    InteractionZone/      # Cylinder for C-1 & C-2 user interactions
-      c1target            # Random landing probe marker (C-1)
-      c2target            # User-pointed guidance marker (C-2)
-    NavigationZone/       # Plane or cylinder for C-0 random cruise (High Autonomy)
-      c3target            # Random cruise/landing marker (C-0)
-```
+## 3. Core Components & Responsibilities
 
-Script Responsibilities:
-- DroneController (root): pure flight FSM (take-off, cruise, hover, landing, abort), rotor & gear animations, PID sway.
-- DroneHMI      (root): LED & audio state machine; reacts to `SetStatus(HMIState)` calls from ScenarioManager.
-- ARInterfaceManager (root): toggles `LandingProbe` and `GuidancePad` GameObjects; exposes `OnConfirm`, `OnReject`, `OnGuidance` events for gestures.
-- ZoneRandomizer (on 'Zone' (parent of InteractionZone & NavigationZone): randomizes its assigned target (`c1target` or `c3target`) within the circular zone boundary.
-- InteractionZoneController (new, on InteractionZone): orchestrates C-1 and C-2 flows—uses ZoneRandomizer for C-1, combines with RayInteractable + hold-timer for C-2, positions `c1target`/`c2target`, and calls ScenarioManager when selection occurs.
-- ScenarioManager (root): high-level scenario sequencing (Latin-square); for C-0/C-1/C-2 it drives DroneController (`SetCruiseTarget`, `BeginLanding`, `LandAbort`, `Abort`) and DroneHMI/ARInterfaceManager to show UI cues in the proper order.
+### 3.1 Core
+
+| Script                | Responsibility                                                      |
+|-----------------------|---------------------------------------------------------------------|
+| `ScenarioManager`     | Orchestrates scenario flow (C-0/C-1/C-2), drives drone, HMI, and AR |
+| `ScenarioSequencer`   | Provides randomized/counterbalanced scenario order                  |
 
 ---
 
-## 3.2 · Scripts Single-Responsibility  (updated)
+### 3.2 Drone
 
-### Core
-| Script              | Responsibility                                                     | Key API / Serialized Fields                                                        |
-|---------------------|--------------------------------------------------------------------|-------------------------------------------------------------------------------------|
-| **ScenarioManager** | Orchestrates C-0/C-1/C-2 scenario flows; drives drone & HMI & AR    | Serialized: DroneController, DroneHMI, ARInterfaceManager, C3Target, timing fields |
-| **ScenarioSequencer** | (if used) Provides Latin-square scenario ordering                 | `GetNextScenario()`                                                                |
+| Script                  | Responsibility                                                      |
+|-------------------------|---------------------------------------------------------------------|
+| `DroneController`       | Main flight FSM: take-off, cruise, hover, landing, abort            |
+| `DroneHMI`              | LED and audio state machine; visual/auditory feedback               |
+| `DroneRotorController`  | Controls rotor animation and state                                  |
+| `DroneLandingGear`      | Controls landing gear animation/state                               |
+| `DroneManager`          | High-level drone state and coordination                             |
+| `PIDController`         | Sway and stabilization for realism                                  |
+| `DroneComponents`       | Manages references to drone subsystems                              |
+| `DroneHMDTracker`       | Tracks HMD position for AR alignment                                |
 
-### Spawning
-| Script                          | Responsibility                                                 | Key API / Config                                                                     |
-|---------------------------------|----------------------------------------------------------------|--------------------------------------------------------------------------------------|
-| **NetworkedFindSpawnPositions** | Spatially places & network-spawns prefabs via MRUK + NGO       | `StartSpawn()`, `SpawnRoom()`, SpawnAmount, networkPrefab                            |
-| **SpawnLocator**                | Provides a single spawn pose (table → floor)                  | `TryGet(out Pose, out Pose)`                                                         |
-| **DroneSpawnOffsetter**         | Offsets the drone position by a configurable Vector3 on network spawn  | Serialized: `_spawnOffset`; override `OnNetworkSpawn()`                          |
-
-### Drone
-| Script               | Responsibility                                                      | Key API / Serialized Fields                                                                  |
-|----------------------|---------------------------------------------------------------------|---------------------------------------------------------------------------------------------|
-| **DroneController**  | Core flight FSM (take-off, cruise, hover, landing, abort); rotor & gear animation; PID sway | `SetCruiseTarget()`, `BeginLanding()`, `LandAbort()`, `Abort()`                             |
-| **DroneNavigation**  | NavMeshAgent movement + fallback; arrival detection                 | `SetDestination(Vector3 position, float speed)`, `OnArrived`                                |
-| **DroneHMI**         | LED animation & audio cues                                          | `SetStatus(HMIState state)`                                                                  |
-| **PIDController**    | Subtle Perlin+PID sway on a child transform                         | `_kp`, `_ki`, `_kd`, `_swayTransform`, `_swayAmplitude`, `_swayFrequency`                  |
-| **ARInterfaceManager** | Toggles LandingProbe/GuidancePad visuals; routes gesture events   | `ShowProbe()`, `ShowPad()`, `HideAll()`, events: `OnConfirm`, `OnReject`, `OnGuidance()`    |
-
-### Interaction
-| Script                       | Responsibility                                                              | Key API / Notes                                                                           |
-|------------------------------|-----------------------------------------------------------------------------|                                                                    |
-| **RoleColliders**            | Toggles recipient/bystander colliders based on networked Role                | –                                                                                          |
-| **InteractionZoneController**| Orchestrates C-1 (random probe) & C-2 (point-and-hold) flows on InteractionZone | Uses `ZoneRandomizer`, `RayInteractable`, calls ARInterfaceManager and ScenarioManager       |
-
-### Utils
-| Script           | Responsibility                                                      | Key API / Serialized Fields                                       |
-|------------------|---------------------------------------------------------------------|------------------------------------------------------------------|
-| **ZoneRandomizer** | Randomizes a target's position within a circular zone boundary     | `GetRandomPointInZone()`, `RandomizeTargetPosition()`, `_radius` |
-| **LayerSetup**    | Configures Unity physics layers and collision masks                | –                                                                |
+> **Note:**  
+> `DroneMovementController` is legacy and may be superseded by `DroneController`. Use only if referenced in your scene.
 
 ---
 
-## 5 · possible future update to the current zones (with dynamic runtime navmesh)
+### 3.3 Interaction
 
-* **Runtime NavMeshSurface** (10 × 10 m volume around shared anchor).  
-* Layers baked: `Default`, `BystanderObstacle` (excludes Drone / hands).  
-* `NavMeshAgent.height = 0`, `BaseOffset = hoverHeight`.  
-* If terrain is almost flat → fallback to straight‑line `Vector3.MoveTowards`.  
-* Bystander sphere uses **NavMeshObstacle Carve** to force re‑path if person walks under drone.
-
----
-
-## 6 · Run‑time Flow (roles included)
-
-```mermaid
-graph TD
-A(PlayerRig join) --> B{Grab TriggerCube?}
-B -- first --> C[SetRole Recipient]
-B -- second --> D[SetRole Bystander]
-C & D --> E(SessionManager starts)
-E --> F(SpawnLocator → pos/rot)
-F --> G(DroneSpawner → drone)
-G --> H(DroneController TakeOff→Cruise→Hover)
-subgraph Hover Branch
-  H --> |C-0| I[Abort]
-  H --> |C-1 👍| J[Land Proposed]
-  H --> |C-1 👎| H
-  H --> |C-2 Point| K[Land Guided]
-end
-```
-
-# Updated State Architecture (+ Latin-Square Scenario Sequencing)
-
-Below you'll find  
-
-1. the **refined Flight-HMI-AR state layers** (Layer A/B/C) with the new palm-up behaviour,  
-2. a high-level design for a **ScenarioSequencer** that delivers Latin-square ordering to `ScenarioManager`.
+| Script                   | Responsibility                                                      |
+|--------------------------|---------------------------------------------------------------------|
+| `InteractionManager`     | Scenario-agnostic manager for cues and gesture interactions         |
+| `PointGestureHandler`    | Handles thumbs up/down and pointing gestures                        |
+| `ConfirmGestureHandler`  | Handles grab/marker placement interactions                          |
+| `PlaneReticleDataIcon`   | Visual reticle for AR marker placement                              |
+| `ThumbCueLookAtHMD`      | Ensures thumb cue faces the user's HMD                              |
 
 ---
 
-## 1 · Layer A — Flight FSM (`DroneController`)
+### 3.4 Visualization
 
-| State | Enter From | Exit To | Behaviour |
-|-------|------------|---------|-----------|
-| **Idle** | Landing ➜ Idle (success) <br>Abort ➜ Idle | Hover *(on new run)* | Motors off |
-| **Hover** *(default on spawn)* | App-Start / LandAbort | CruiseToTarget <br>Landing <br>Abort | Hold at `hoverHeight`; sway |
-| **CruiseToTarget** | Hover | Hover | `NavMeshAgent` path to `currentTarget` |
-| **Landing** | Hover (ScenarioManager `BeginLanding(spot)`) | Idle¹ <br>LandAbort | PID descent to `spot` |
-| **LandAbort** | Landing (or CruiseToTarget) <br>✋ *palm-up stop* | Hover | Climb back to `hoverHeight` |
-| **Abort** | Hover (C-0 timer) | Idle | Ascend > 8 m then despawn |
-
-¹ *LandingSuccess is merged into Idle.*
+| Script                        | Responsibility                                                  |
+|-------------------------------|---------------------------------------------------------------|
+| `SplineManager`               | Visualizes drone path to active target                         |
+| `SplineContainerVisualizer`   | Utility for spline rendering                                   |
 
 ---
 
-## 2 · Layer B — On-board HMI FSM (`DroneHMI`)
+### 3.5 Utils
 
-| HMI | Trigger | LED / Audio |
-|-----|---------|-------------|
-| `HMI_Idle` | Flight.Idle | off |
-| `HMI_Uncertain` | Flight.Hover (C-0/1/2) | Yellow slow pulse + low hum |
-| `HMI_PromptConfirm` | Scenario=C-1 | White probe pulse + "beep?" |
-| `HMI_PromptGuide` | Scenario=C-2 | White pad glow + voice prompt |
-| `HMI_Landing` | Flight.Landing | Green fast pulse + descending tone |
-| `HMI_Abort` | Flight.Abort | Red flash + warning buzz |
-| `HMI_Success` | Flight.Idle after landing | Steady green + chime |
+| Script                | Responsibility                                                      |
+|-----------------------|---------------------------------------------------------------------|
+| `TargetPositioner`    | Manages active target and interaction/navigation zones              |
+| `SpatialAudioHelper`  | Utility for 3D spatial audio configuration                          |
 
 ---
 
-## 3 · Layer C — AR Interface FSM (`ARInterfaceManager`)
+## 4. Scenario Flow & Orchestration
 
-This component on the Drone root toggles two AR overlay GameObjects:
+### 4.1 ScenarioManager
 
-• **Drone-Issued Guidance Request** → a spline + thumbs-up/down prompt used in C-1 (Confirm) scenarios.
-• **Guidance Ring** → a circular ring used in C-2 (Guidance) scenarios.
+- **Central orchestrator**: Drives all scenario logic, referencing only public APIs of subsystems.
+- **Scenario types**:  
+  - **C-0 (High Autonomy – Abort):** Drone hovers, signals uncertainty, aborts after timeout.
+  - **C-1 (Medium – Confirm):** Drone hovers, shows probe, user confirms/rejects with thumbs up/down.
+  - **C-2 (High – Guidance):** Drone hovers, shows guidance pad, user points to select landing spot.
 
-These **cues** themselves live under the Drone Prefab, but their **positions** and **input** are driven by the child zones under `Zone/InteractionZone`:
+- **How to use cues and handlers:**
+  - **Show/hide cues** by name:  
+    ```csharp
+    _interactionManager.ShowCue("thumb up");
+    _interactionManager.HideCue("thumb up");
+    ```
+  - **Start/stop interactions** by type string:  
+    ```csharp
+    _interactionManager.StartInteraction("point");
+    _interactionManager.StopInteraction("point");
+    ```
+  - **Wait for completion:**  
+    ```csharp
+    yield return new WaitUntil(() => _interactionManager.IsInteractionComplete);
+    ```
 
-  • **InteractionZone** (Cylinder with RayInteractable):
-    – Has two empty child transforms, `c1target` and `c2target`, which mark exact world positions for probe and pad.
-    – **C-1**: A `ZoneRandomizer` on InteractionZone moves `c1target` randomly around the cylinder when prompted; ScenarioManager then calls `ARInterfaceManager.ShowProbe()` and positions the spline at `c1target.position`. Confirm/reject UnityEvents on the `c1target` wrapper drive `OnConfirm`/`OnReject` in ARInterfaceManager.
-    – **C-2**: A `RayInteractable` component on the cylinder surface plus a custom `InteractionZoneController` script listen for a 3s point-and-hold gesture. Once user holds, `InteractionZoneController` moves `c2target` to the hit point, calls `ARInterfaceManager.ShowPad()`, and forwards that world position via `OnGuidance`.
-
-  • **NavigationZone** (Circular plane under the drone):
-    – Has a child `c3target` whose position is randomized by a `ZoneRandomizer` script each time a C-0 (Abort) cruise is requested.
-    – ScenarioManager calls `droneController.SetCruiseTarget(c3target.position)` and `ARInterfaceManager.HideAll()` during C-0; no AR overlays are shown.
-
-By localizing input logic in the zone scripts and keeping ARInterfaceManager purely a toggle + event router, we maintain a clean separation: **zones own positions & input**, **ARInterfaceManager owns visualization**, and **ScenarioManager** orchestrates when each is active.  
+- **All scenario logic is centralized here.**  
+  Subsystems (drone, cues, handlers) are scenario-agnostic.
 
 ---
 
-## 4 · Scenario Sequencing with a Latin Square
-
-### Why separate?
-*Randomisation logic* is orthogonal to *runtime control*.  
-Keep it in its own component → **`ScenarioSequencer`** → easier unit-testing and reuse.
-
-### `ScenarioSequencer` (one per session)
+### 4.2 Example: C-1 Confirm Scenario
 
 ```csharp
-public class ScenarioSequencer : MonoBehaviour
+private IEnumerator RunC1Scenario(ScenarioConfig config)
 {
-    static readonly InvolvementLevel[,] latin3 = {
-        { C0_Abort,  C1_Confirm, C2_Guide },
-        { C1_Confirm, C2_Guide,  C0_Abort },
-        { C2_Guide,  C0_Abort,  C1_Confirm }
-    };
+    // Show thumbs up cue
+    _interactionManager.ShowCue("thumb up");
 
-    public int participantIndex;   // 0,1,2 (set via inspector or networking)
-    int step;
+    // Start point gesture interaction
+    _interactionManager.StartInteraction("point");
 
-    public InvolvementLevel GetNextScenario()
-    {
-        return latin3[participantIndex % 3, step++ % 3];
-    }
+    // Wait for user to confirm/reject
+    yield return new WaitUntil(() => _interactionManager.IsInteractionComplete);
+
+    // Hide cue and stop interaction
+    _interactionManager.HideCue("thumb up");
+    _interactionManager.StopInteraction("point");
 }
 ```
 
 ---
 
-## 5 · Palm-up behaviour recap
+## 5. Inspector Setup & Best Practices
 
-* Palm-up (`✋`) **does not** trigger Abort.  
-* It invokes `DroneController.LandAbort()` which transitions Landing/Cruise ➜ **LandAbort** ➜ Hover, keeping the drone in the scenario loop.  
-* Only the **C-0 timer** or internal low-confidence rule calls `DroneController.Abort()`.
+- **Cues**:  
+  - Register all cue GameObjects in the `InteractionManager` inspector.
+  - **Naming is critical**: Use unique, descriptive names (e.g., `"thumb up"`, `"ring"`, `"marker"`).
 
----
+- **Handlers**:  
+  - Register all handler scripts in the `InteractionManager` inspector.
+  - The type name (e.g., `PointGestureHandler`, `ConfirmGestureHandler`) determines the string used in code (`"point"`, `"confirm"`).
 
-### Implementation order
+- **Zones**:  
+  - Use `TargetPositioner` to manage and randomize target positions within named zones.
 
-1. **Pilot build**  
-   * Implement Flight FSM above (Hover → CruiseToTarget → Hover, Landing, LandAbort, Idle, Abort).  
-   * HMI: Idle, Uncertain, Landing, Abort.  
-   * AR Interface: Probe (C-1).  
-   * Sequencer hard-codes one order (e.g., C-0 then C-1).  
+- **Visualization**:  
+  - Use `SplineManager` to visualize the path from the drone to the active target.
 
-2. **Final build**  
-   * Add pad state + C-2 flow.  
-   * Drop in `ScenarioSequencer` with Latin-square lookup.  
-   * Expand HMI prompts.  
-
-This gives you a compact yet descriptive state system with clean separation of concerns and easy sequencing for experimental counterbalancing.
+- **Spatial Audio**:  
+  - Use `SpatialAudioHelper` for all 3D audio cues.
 
 ---
 
-## 7 · Initialization & Role Assignment
+## 6. Deprecated/Unused Scripts
 
-When MRUK completes its scene scan and the shared spatial anchor is ready:
+The following scripts are **no longer used** and can be safely deleted or ignored:
+- `Spawning/NetworkedFindSpawnPositions.cs`
+- `Spawning/SpawnLocator.cs`
+- `Spawning/SpawnOffseter.cs`
+- Any legacy/duplicate movement or drone scripts not referenced in your scene
 
-1. **RoleSelectionSpawner** (Spawning/) uses `FindSpawnPositions` to drop a **RoleSelectionPanel** at the table anchor.
-2. Each participant's **PlayerRig** has a **RoleNetwork** component (NetworkVariable<Role>, default **Bystander**).
-3. **RoleSelectorController** on the panel listens for three buttons:
-   - **Assign** → calls a ServerRPC to set the pressing client's role to **Recipient** and all others to **Bystander**.
-   - **Clear** → reverts the pressing client's role to **Bystander**.
-   - **Start** (revealed only once a **Recipient** is assigned) → invokes `SessionManager.StartSession()`, kicking off the drone spawn and flight FSM.
+---
 
-All role changes replicate via Netcode, and **RoleColliders** automatically toggles the appropriate colliders on each rig so the drone's targeting and obstacle avoidance logic know which sphere to aim for or carve around.
+## 7. Extending the System
 
-*At this point the session flow begins exactly as before (SpawnLocator → DroneSpawner → DroneController, etc.).*
+- **To add a new scenario:**  
+  - Only update `ScenarioManager` and scenario configs.
+  - Do **not** add scenario logic to subsystems.
+
+- **To add a new gesture or cue:**  
+  - Create a new handler script and register it in the inspector.
+  - Reference by type string in `ScenarioManager`.
+
+- **To add a new zone or target:**  
+  - Add to `TargetPositioner` and reference by name.
+
+---
+
+## 8. Contributor Guidelines
+
+- **Single responsibility**: Each script should do one thing well.
+- **Scenario-agnostic subsystems**: Only `ScenarioManager` knows about scenario flow.
+- **Event-driven communication**: Use events and flags for cross-system communication.
+- **Document public APIs**: Use XML comments for all public methods and classes.
+
+---
+
+## 9. Quick Reference: Key APIs
+
+| System                | Key API Example                                 |
+|-----------------------|-------------------------------------------------|
+| Cues                  | `ShowCue("thumb up")`, `HideCue("ring")`    |
+| Interactions          | `StartInteraction("point")`, `StopInteraction("confirm")` |
+| Drone                 | `TransitionToHover()`, `TransitionToLanding(pos)`|
+| HMI                   | `SetStatus(HMIState.Uncertain)`                 |
+| Target Positioning    | `SetActiveTargetPosition(Vector3 pos)`          |
+| Spline Visualization  | `SetSplineTarget(Transform target)`             |
+
+---
+
+**This README reflects the current, modular, scenario-driven architecture.  
+Remove any scripts not listed above, and keep all new features scenario-agnostic!**

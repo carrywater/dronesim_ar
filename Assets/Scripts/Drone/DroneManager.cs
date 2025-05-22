@@ -17,13 +17,13 @@ public class DroneManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Spawns or moves the drone to the specified (x, y, z) world position.
-    /// Sets the child 'Drone Runtime Offset' localPosition.z to abortHeight.
+    /// Spawns or moves the drone to the specified (x, z) world position and sets the runtime offset Y to the desired height.
     /// </summary>
-    public DroneController SpawnOrMoveDrone(Vector3 position, float abortHeight)
+    public DroneController SpawnOrMoveDroneWithOffset(Vector2 xzPosition, float offsetY)
     {
         if (!HasActiveDrone())
         {
+            Vector3 position = new Vector3(xzPosition.x, 0f, xzPosition.y);
             var droneObj = Instantiate(_dronePrefab, position, Quaternion.identity);
             _activeDrone = droneObj.GetComponent<DroneController>();
             if (_activeDrone == null)
@@ -31,24 +31,25 @@ public class DroneManager : MonoBehaviour
                 Debug.LogError("DroneManager: Prefab does not have a DroneController component!");
                 return null;
             }
+            SetRuntimeOffsetY(offsetY); // Only set offset Y at spawn
         }
         else
         {
+            // Only update X and Z, preserve current Y
+            Vector3 position = _activeDrone.transform.position;
+            position.x = xzPosition.x;
+            position.z = xzPosition.y;
             _activeDrone.transform.position = position;
-        }
-        // Set the child 'Drone Runtime Offset' z to abortHeight
-        var offset = _activeDrone.transform.Find("Drone Runtime Offset");
-        if (offset != null)
-        {
-            var local = offset.localPosition;
-            local.z = abortHeight;
-            offset.localPosition = local;
-        }
-        else
-        {
-            Debug.LogWarning("DroneManager: Could not find 'Drone Runtime Offset' child.");
+            // Do not set offset Y again here
         }
         return _activeDrone;
+    }
+
+    // Deprecated: Use SpawnOrMoveDroneWithOffset instead for robust initialization
+    public DroneController SpawnOrMoveDrone(Vector2 xzPosition)
+    {
+        Debug.LogWarning("SpawnOrMoveDrone(Vector2) is deprecated. Use SpawnOrMoveDroneWithOffset(Vector2, float) instead.");
+        return SpawnOrMoveDroneWithOffset(xzPosition, 0f);
     }
 
     /// <summary>
@@ -67,4 +68,24 @@ public class DroneManager : MonoBehaviour
     /// Returns the currently active drone.
     /// </summary>
     public DroneController GetActiveDrone() => _activeDrone;
+
+    /// <summary>
+    /// Sets the local Y offset of the 'Drone Runtime Offset' child.
+    /// </summary>
+    public void SetRuntimeOffsetY(float y)
+    {
+        if (!HasActiveDrone()) return;
+        var offset = _activeDrone.transform.Find("Drone Runtime Offset");
+        if (offset != null)
+        {
+            var local = offset.localPosition;
+            local.y = y;
+            offset.localPosition = local;
+            Debug.Log($"[DroneManager] SetRuntimeOffsetY called with y={y} (frame {Time.frameCount})");
+        }
+        else
+        {
+            Debug.LogWarning("DroneManager: Could not find 'Drone Runtime Offset' child.");
+        }
+    }
 } 

@@ -14,9 +14,26 @@ public class PIDController : MonoBehaviour
     [SerializeField] private float _damping = 0.98f; // Added for realism
     [SerializeField] private float _outputNoise = 0.001f; // Small noise for realism
 
+    [Header("Rotation Compensation")]
+    [SerializeField] private float _maxTiltAngle = 15f; // Maximum tilt angle in degrees
+    [SerializeField] private float _rotationDamping = 0.95f; // Damping for rotation
+    [SerializeField] private float _rotationSpeed = 2f; // How fast the drone rotates to compensate
+    [SerializeField] private Transform _droneBody; // The main drone body to rotate
+
     private Vector3 _integral;
     private Vector3 _lastError;
     private Vector3 _velocity;
+    private Vector3 _rotationVelocity;
+    private Quaternion _targetRotation;
+
+    private void Start()
+    {
+        if (_droneBody == null)
+        {
+            _droneBody = transform;
+        }
+        _targetRotation = _droneBody.rotation;
+    }
 
     private void Update()
     {
@@ -48,11 +65,34 @@ public class PIDController : MonoBehaviour
         _velocity += output * Time.deltaTime;
         _velocity *= _damping; // Damping
 
+        // Calculate rotation compensation based on error and velocity
+        Vector3 rotationCompensation = CalculateRotationCompensation(error, _velocity);
+        
+        // Smoothly interpolate current rotation to target rotation
+        _targetRotation = Quaternion.Euler(rotationCompensation);
+        _droneBody.rotation = Quaternion.Slerp(
+            _droneBody.rotation,
+            _targetRotation,
+            _rotationSpeed * Time.deltaTime
+        );
+
         // Apply sway
         _swayTransform.localPosition += _velocity * Time.deltaTime;
 
         // Store last error
         _lastError = error;
+    }
+
+    private Vector3 CalculateRotationCompensation(Vector3 error, Vector3 velocity)
+    {
+        // Calculate tilt angles based on error and velocity
+        float tiltX = Mathf.Clamp(-error.z * 2f - velocity.z, -_maxTiltAngle, _maxTiltAngle);
+        float tiltZ = Mathf.Clamp(error.x * 2f + velocity.x, -_maxTiltAngle, _maxTiltAngle);
+        
+        // Add a small random rotation for realism
+        float randomTilt = Random.Range(-0.5f, 0.5f);
+        
+        return new Vector3(tiltX, 0f, tiltZ + randomTilt);
     }
 
     /// <summary>
@@ -62,5 +102,13 @@ public class PIDController : MonoBehaviour
     public void ApplyExternalInfluence(Vector3 force)
     {
         _velocity += force;
+        
+        // Also apply a rotation influence based on the force
+        Vector3 rotationInfluence = new Vector3(
+            -force.z * 0.5f, // Tilt forward/backward based on Z force
+            0f,
+            force.x * 0.5f  // Tilt left/right based on X force
+        );
+        _targetRotation *= Quaternion.Euler(rotationInfluence);
     }
 } 

@@ -4,7 +4,7 @@ using System;
 /// <summary>
 /// Controls drone rotor animation and propeller sound.
 /// Responsibilities:
-/// - Start/stop rotor animation
+/// - Start/stop rotor rotation via code (local Z axis)
 /// - Play/stop propeller sound
 /// Usage:
 /// - Call StartRotors() to animate and play sound
@@ -12,8 +12,9 @@ using System;
 /// </summary>
 public class DroneRotorController : MonoBehaviour
 {
-    [Header("Rotor Animation")]
-    [SerializeField] private Animator _rotorAnimator;
+    [Header("Rotor Transforms")]
+    [SerializeField] private Transform[] _rotors;
+    [SerializeField] private float _rotorSpinSpeed = 720f; // degrees per second
 
     [Header("Propeller Sound")]
     [SerializeField] private AudioSource _propellerSource;
@@ -34,12 +35,35 @@ public class DroneRotorController : MonoBehaviour
             SpatialAudioHelper.Configure(_propellerSource);
     }
 
+    private void Update()
+    {
+        // Rotate all rotors if active
+        if (_rotorsActive && _rotors != null)
+        {
+            foreach (var rotor in _rotors)
+            {
+                if (rotor != null)
+                {
+                    rotor.Rotate(Vector3.forward, _rotorSpinSpeed * Time.deltaTime, Space.Self);
+                }
+            }
+        }
+        // Handle propeller sound fade and pitch
+        if (_propellerSource != null)
+        {
+            _currentVolume = Mathf.MoveTowards(_currentVolume, _targetVolume, _fadeSpeed * Time.deltaTime);
+            _propellerSource.volume = _currentVolume;
+            _propellerSource.pitch = Mathf.Lerp(_propellerSource.pitch, _targetPitch, _fadeSpeed * Time.deltaTime);
+            if (_currentVolume <= 0f && !_rotorsActive && _propellerSource.isPlaying)
+                _propellerSource.Stop();
+        }
+    }
+
     public void StartRotors()
     {
         _rotorsActive = true;
         _targetVolume = _baseVolume;
         _targetPitch = 1.0f;
-        if (_rotorAnimator != null) _rotorAnimator.SetBool("RotorsOn", true);
         if (_propellerSource != null && _propellerHumClip != null && !_propellerSource.isPlaying)
         {
             _propellerSource.clip = _propellerHumClip;
@@ -53,38 +77,5 @@ public class DroneRotorController : MonoBehaviour
     {
         _rotorsActive = false;
         _targetVolume = 0f;
-        if (_rotorAnimator != null) _rotorAnimator.SetBool("RotorsOn", false);
-    }
-
-    public void SetRotorPitch(float normalizedSpeed)
-    {
-        if (_rotorsActive)
-        {
-            _targetPitch = Mathf.Lerp(_pitchMin, _pitchMax, normalizedSpeed);
-        }
-    }
-
-    private void Update()
-    {
-        // Smoothly adjust volume
-        if (_propellerSource != null)
-        {
-            if (_currentVolume != _targetVolume)
-            {
-                _currentVolume = Mathf.MoveTowards(_currentVolume, _targetVolume, _fadeSpeed * Time.deltaTime);
-                _propellerSource.volume = _currentVolume;
-                if (_currentVolume <= 0.01f && _propellerSource.isPlaying)
-                    _propellerSource.Stop();
-                else if (_currentVolume > 0.01f && !_propellerSource.isPlaying && _propellerHumClip != null)
-                {
-                    _propellerSource.clip = _propellerHumClip;
-                    _propellerSource.Play();
-                }
-            }
-            if (_propellerSource.isPlaying && _propellerSource.pitch != _targetPitch)
-            {
-                _propellerSource.pitch = Mathf.Lerp(_propellerSource.pitch, _targetPitch, Time.deltaTime * 2f);
-            }
-        }
     }
 } 
