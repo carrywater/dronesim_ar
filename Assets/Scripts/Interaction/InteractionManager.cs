@@ -80,7 +80,8 @@ public class InteractionManager : MonoBehaviour
             if (handler is PointGestureHandler pointHandler)
             {
                 pointHandler.SetActive(true);
-                pointHandler.OnPointGestureDetected += CompleteInteraction;
+                pointHandler.OnThumbsUp += CompleteInteraction;
+                pointHandler.OnThumbsDown += CompleteInteraction;
             }
             else if (handler is ConfirmGestureHandler confirmHandler)
             {
@@ -102,7 +103,8 @@ public class InteractionManager : MonoBehaviour
             if (handler is PointGestureHandler pointHandler)
             {
                 pointHandler.SetActive(false);
-                pointHandler.OnPointGestureDetected -= CompleteInteraction;
+                pointHandler.OnThumbsUp -= CompleteInteraction;
+                pointHandler.OnThumbsDown -= CompleteInteraction;
             }
             else if (handler is ConfirmGestureHandler confirmHandler)
             {
@@ -117,20 +119,5 @@ public class InteractionManager : MonoBehaviour
     {
         IsInteractionComplete = true;
         OnInteractionComplete?.Invoke();
-    }
-
-    /// <summary>
-    /// Try to get the pointed position from the point gesture handler
-    /// </summary>
-    public bool TryGetPointedPosition(out Vector3 position)
-    {
-        position = Vector3.zero;
-        if (_handlerDict.TryGetValue("pointgesturehandler", out var handler) &&
-            handler is PointGestureHandler pointHandler)
-        {
-            position = pointHandler.LastPointedPosition;
-            return true;
-        }
-        return false;
     }
 } 

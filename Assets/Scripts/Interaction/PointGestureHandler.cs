@@ -1,55 +1,33 @@
 using UnityEngine;
 using System;
-using Oculus.Interaction;
-using Oculus.Interaction.HandGrab;
+using Interaction;
 
 namespace Interaction
 {
     /// <summary>
-    /// Handles point-based gestures and provides the pointed position
+    /// Handles point-based gestures like thumbs up/down
     /// </summary>
     public class PointGestureHandler : MonoBehaviour
     {
-        public event Action OnPointGestureDetected;
-        public Vector3 LastPointedPosition { get; private set; }
+        public event Action OnThumbsUp;
+        public event Action OnThumbsDown;
 
-        private DistanceHandGrabInteractable _interactable;
-        private bool _isEnabled;
-
-        private void Start()
-        {
-            _interactable = GetComponent<DistanceHandGrabInteractable>();
-            if (_interactable != null)
-            {
-                _interactable.WhenPointerEventRaised += OnPointerEvent;
-            }
-        }
+        private bool _isActive;
 
         public void SetActive(bool active)
         {
-            _isEnabled = active;
-            if (_interactable != null)
-                _interactable.enabled = active;
+            _isActive = active;
         }
 
-        private void OnPointerEvent(PointerEvent evt)
+        // This would be called by your gesture recognition system
+        public void OnGestureDetected(bool isThumbsUp)
         {
-            if (!_isEnabled) return;
+            if (!_isActive) return;
 
-            // Check for hover event to get pointed position
-            if (evt.Type == PointerEventType.Hover)
-            {
-                LastPointedPosition = evt.Pose.position;
-                OnPointGestureDetected?.Invoke();
-            }
-        }
-
-        private void OnDestroy()
-        {
-            if (_interactable != null)
-            {
-                _interactable.WhenPointerEventRaised -= OnPointerEvent;
-            }
+            if (isThumbsUp)
+                OnThumbsUp?.Invoke();
+            else
+                OnThumbsDown?.Invoke();
         }
     }
 } 

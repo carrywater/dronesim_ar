@@ -293,14 +293,7 @@ public class ScenarioManager : MonoBehaviour
         Debug.Log($"[C0] Transitioning to hover at height={_drone.HoverHeight}");
         
         // Wait for hover with vertical check only
-        var verticalCheck = new PositionValidator.AxisCheck { checkX = false, checkZ = false };
-        Vector3 hoverTarget = new Vector3(startPos.x, _drone.HoverHeight, startPos.z);
-        yield return PositionValidator.WaitForStateAndPosition(
-            _drone,
-            DroneController.FlightState.Hover,
-            hoverTarget,
-            verticalCheck
-        );
+        yield return new WaitUntil(() => !_drone.IsMovementComplete());
         Debug.Log($"[C0] Reached hover position: {_drone.DroneOffset.position}");
 
         // 3. Start rotors and wait for HMI
@@ -310,9 +303,9 @@ public class ScenarioManager : MonoBehaviour
         Debug.Log("[C0] HMI sequence complete");
 
         // Retract landing gear before starting landing attempts
-        yield return new WaitForSeconds(config.interStepPause);
+         yield return new WaitForSeconds(config.interStepPause);
         _landingGear.RetractLegs();
-        yield return new WaitForSeconds(config.interStepPause);
+         yield return new WaitForSeconds(config.interStepPause);
 
         // 4-8. Landing attempt loop
         for (int attempt = 0; attempt < config.landingAttempts; attempt++)
@@ -320,43 +313,58 @@ public class ScenarioManager : MonoBehaviour
             Debug.Log($"[C0] Starting landing attempt {attempt + 1}/{config.landingAttempts}");
             yield return new WaitForSeconds(config.interStepPause);
 
-            // 0. Set new random target position
+            // Get random position from NavigationZone
             Vector3 targetPos = _targetPositioner.GetRandomPositionInZone("NavigationZone");
             targetPos.y = _drone.transform.position.y; // keep at hover height
+            // Move the active target to the new random position
             _targetPositioner.SetActiveTargetPosition(targetPos);
             Debug.Log($"[C0] Selected target position: {targetPos}");
 
-            // 1. Show ring cue and spline
+            // Show ring cue and spline before descent
             Debug.Log("[C0] Showing ring cue and spline");
             _interactionManager.ShowCue("ring");
             _splineManager.ShowSpline();
+             yield return new WaitForSeconds(config.interStepPause);
 
-            // 2. Cruise to target and hover there for 3 seconds
-            yield return StartCoroutine(_drone.HoverAtPosition(targetPos, 3f));
-            Debug.Log($"[C0] Completed hover at target position: {_drone.DroneOffset.position}");
+            // Move horizontally to target (XZ only)
+            Debug.Log("[C0] Calling TransitionToCruise");
+            _drone.TransitionToCruise(targetPos);
+            yield return new WaitUntil(() => !_drone.IsMovementComplete());
+            Debug.Log($"[C0] Reached cruise position: {_drone.DroneOffset.position}");
 
-            // 3. Hide visual cues
+            // Wait for cruise to finish and state to be Cruising
+            yield return new WaitUntil(() => !_drone.IsMovementComplete());
+            yield return new WaitUntil(() => _drone.CurrentState == DroneController.FlightState.Cruising);
+
+            // Begin descent to 80% of hover height, directly above the active target
+            float descentHeight = _drone.HoverHeight * 0.8f;
+            Vector3 descentPos = targetPos;
+            descentPos.y = descentHeight;
+            Debug.Log($"[C0] Calling TransitionToLanding with descentPos={descentPos}");
+            _drone.TransitionToLanding(descentPos);
+            yield return new WaitUntil(() => !_drone.IsMovementComplete());
+            Debug.Log($"[C0] Reached descent position: {_drone.DroneOffset.position}");
+
+            // Hide ring cue and spline after descent
             Debug.Log("[C0] Hiding ring cue and spline");
             _interactionManager.HideCue("ring");
             _splineManager.HideSpline();
 
-            // 4. Signal uncertainty
+            // Signal uncertainty
             Debug.Log("[C0] Setting HMI to Uncertain");
             _hmi.SetStatus(DroneHMI.HMIState.Uncertain, true);
             yield return StartCoroutine(WaitForHMIComplete());
             Debug.Log("[C0] Uncertainty HMI complete");
 
-            // 5. Return to abort height
-            Vector3 abortPos = new Vector3(targetPos.x, _drone.AbortHeight, targetPos.z);
-            Debug.Log($"[C0] Calling TransitionToAbort with abortPos={abortPos}");
-            _drone.TransitionToAbort();
-            yield return PositionValidator.WaitForStateAndPosition(
-                _drone,
-                DroneController.FlightState.Aborting,
-                abortPos,
-                verticalCheck
-            );
-            Debug.Log($"[C0] Reached abort position: {_drone.DroneOffset.position}");
+            // Wait for current movement to complete
+            yield return new WaitUntil(() => !_drone.IsMovementComplete());
+            
+            // Return to hover height
+            Vector3 hoverPos = new Vector3(targetPos.x, _drone.HoverHeight, targetPos.z);
+            Debug.Log($"[C0] Returning to hover height at {hoverPos}");
+            _drone.TransitionToHover();
+            yield return new WaitUntil(() => !_drone.IsMovementComplete());
+            Debug.Log($"[C0] Reached hover position: {_drone.DroneOffset.position}");
         }
 
         // 9. Signal mission abort
@@ -367,12 +375,7 @@ public class ScenarioManager : MonoBehaviour
         // 10. Final abort movement
         Vector3 finalAbortPos = new Vector3(_drone.transform.position.x, _drone.AbortHeight, _drone.transform.position.z);
         _drone.TransitionToAbort();
-        yield return PositionValidator.WaitForStateAndPosition(
-            _drone,
-            DroneController.FlightState.Aborting,
-            finalAbortPos,
-            verticalCheck
-        );
+        yield return new WaitUntil(() => !_drone.IsMovementComplete());
         Debug.Log($"[C0] Reached final abort position: {_drone.DroneOffset.position}");
 
         // 11. Stay at abort height
@@ -393,148 +396,9 @@ public class ScenarioManager : MonoBehaviour
     /// </summary>
     private IEnumerator RunC1Scenario(ScenarioConfig config)
     {
-        Debug.Log("[C1] Starting C-1 Scenario (Confirm)");
-
-        // 1. Start at abort height
-        Vector3 startPos = new Vector3(-3f, 0f, 2f);
-        EnsureDroneAt(startPos, _drone.AbortHeight);
-        Debug.Log($"[C1] Initial position set: root={startPos}, offset Y={_drone.AbortHeight}");
-
+        Debug.Log("Starting C-1 Scenario (Confirm)");
         yield return new WaitForSeconds(config.interStepPause);
-
-        // 2. Start rotors and wait for HMI
-        _rotors.StartRotors();
-        _hmi.SetStatus(DroneHMI.HMIState.PromptConfirm, true);
-        yield return StartCoroutine(WaitForHMIComplete());
-        Debug.Log("[C1] HMI sequence complete");
-
-        // 3. Transition to hover height
-        _drone.TransitionToHover();
-        Debug.Log($"[C1] Transitioning to hover at height={_drone.HoverHeight}");
-        
-        // Wait for hover with vertical check only
-        var verticalCheck = new PositionValidator.AxisCheck { checkX = false, checkZ = false };
-        Vector3 hoverTarget = new Vector3(startPos.x, _drone.HoverHeight, startPos.z);
-        yield return PositionValidator.WaitForStateAndPosition(
-            _drone,
-            DroneController.FlightState.Hover,
-            hoverTarget,
-            verticalCheck
-        );
-        Debug.Log($"[C1] Reached hover position: {_drone.DroneOffset.position}");
-
-        // 4. Wait in hover
-        yield return new WaitForSeconds(config.interStepPause);
-
-        // 5. Get initial random position from NavigationZone
-        Vector3 initialTargetPos = _targetPositioner.GetRandomPositionInZone("NavigationZone");
-        initialTargetPos.y = _drone.transform.position.y; // keep at hover height
-        _targetPositioner.SetActiveTargetPosition(initialTargetPos);
-        Debug.Log($"[C1] Selected initial target position: {initialTargetPos}");
-
-        // 6. Cruise to target and hover
-        yield return StartCoroutine(_drone.HoverAtPosition(initialTargetPos, 3f));
-        Debug.Log($"[C1] Completed hover at initial target position: {_drone.DroneOffset.position}");
-
-        // 7. Signal uncertainty
-        _hmi.SetStatus(DroneHMI.HMIState.Uncertain, true);
-        yield return StartCoroutine(WaitForHMIComplete());
-        Debug.Log("[C1] Uncertainty HMI complete");
-
-        // 8. Wait
-        yield return new WaitForSeconds(config.interStepPause);
-
-        // 9. Show interaction zone and enable confirmation
-        _interactionManager.ShowCue("interaction_zone");
-        _interactionManager.ShowCue("thumbs_up");
-        _interactionManager.ShowCue("thumbs_down");
-        _interactionManager.StartInteraction("confirm");
-        Debug.Log("[C1] Enabled confirmation interaction and showing thumbs cues");
-
-        // 10. Landing attempt loop
-        for (int attempt = 0; attempt < config.landingAttempts; attempt++)
-        {
-            Debug.Log($"[C1] Starting landing attempt {attempt + 1}/{config.landingAttempts}");
-            yield return new WaitForSeconds(config.interStepPause);
-
-            // Get random position from InteractionZone
-            Vector3 targetPos = _targetPositioner.GetRandomPositionInZone("InteractionZone");
-            targetPos.y = _drone.transform.position.y; // keep at hover height
-            _targetPositioner.SetActiveTargetPosition(targetPos);
-            Debug.Log($"[C1] Selected target position: {targetPos}");
-
-            // Show ring cue and spline
-            _interactionManager.ShowCue("ring");
-            _splineManager.ShowSpline();
-            Debug.Log("[C1] Showing ring cue and spline");
-
-            // Wait for user confirmation
-            bool isConfirmed = false;
-            _interactionManager.OnInteractionComplete += () => isConfirmed = true;
-            yield return new WaitUntil(() => isConfirmed);
-            _interactionManager.OnInteractionComplete -= () => isConfirmed = true;
-
-            // Hide thumbs cues after interaction
-            _interactionManager.HideCue("thumbs_up");
-            _interactionManager.HideCue("thumbs_down");
-
-            // Check if user confirmed or declined
-            if (isConfirmed)
-            {
-                // Play confirmation HMI
-                _hmi.SetStatus(DroneHMI.HMIState.Success, true);
-                yield return StartCoroutine(WaitForHMIComplete());
-                Debug.Log("[C1] Confirmation HMI complete");
-
-                // Extend legs
-                _landingGear.RetractLegs();
-                yield return new WaitForSeconds(config.interStepPause);
-
-                // Cruise to target and hover briefly
-                yield return StartCoroutine(_drone.HoverAtPosition(targetPos, 1f));
-                Debug.Log($"[C1] Completed hover at target position: {_drone.DroneOffset.position}");
-
-                // Begin landing
-                float descentHeight = _drone.AbortHeight * 0.8f;
-                Vector3 descentPos = targetPos;
-                descentPos.y = descentHeight;
-                _drone.TransitionToLanding(descentPos);
-                yield return PositionValidator.WaitForStateAndPosition(
-                    _drone,
-                    DroneController.FlightState.Descending,
-                    descentPos,
-                    verticalCheck
-                );
-                Debug.Log($"[C1] Completed landing at: {_drone.DroneOffset.position}");
-
-                // Landing successful, break the loop
-                break;
-            }
-            else
-            {
-                // Play decline HMI
-                _hmi.SetStatus(DroneHMI.HMIState.Reject, true);
-                yield return StartCoroutine(WaitForHMIComplete());
-                Debug.Log("[C1] Decline HMI complete");
-
-                // Hide visual cues
-                _interactionManager.HideCue("ring");
-                _splineManager.HideSpline();
-            }
-        }
-
-        // Hide interaction zone at the end
-        _interactionManager.HideCue("interaction_zone");
-
-        // 11. Show completion HMI
-        _hmi.SetStatus(DroneHMI.HMIState.Success, true);
-        yield return StartCoroutine(WaitForHMIComplete());
-        Debug.Log("[C1] Completion HMI complete");
-
-        // 12. Stop rotors
-        _rotors.StopRotors();
-        
-        Debug.Log("[C1] Completed C-1 Scenario");
+        Debug.Log("Completed C-1 Scenario");
     }
     
     #endregion
@@ -546,155 +410,9 @@ public class ScenarioManager : MonoBehaviour
     /// </summary>
     private IEnumerator RunC2Scenario(ScenarioConfig config)
     {
-        Debug.Log("[C2] Starting C-2 Scenario (Guidance)");
-
-        // 1. Start at abort height
-        Vector3 startPos = new Vector3(-3f, 0f, 2f);
-        EnsureDroneAt(startPos, _drone.AbortHeight);
-        Debug.Log($"[C2] Initial position set: root={startPos}, offset Y={_drone.AbortHeight}");
-
+        Debug.Log("Starting C-2 Scenario (Guidance)");
         yield return new WaitForSeconds(config.interStepPause);
-
-        // 2. Start rotors and wait for HMI
-        _rotors.StartRotors();
-        _hmi.SetStatus(DroneHMI.HMIState.PromptGuide, true);
-        yield return StartCoroutine(WaitForHMIComplete());
-        Debug.Log("[C2] HMI sequence complete");
-
-        // 3. Transition to hover height
-        _drone.TransitionToHover();
-        Debug.Log($"[C2] Transitioning to hover at height={_drone.HoverHeight}");
-        
-        // Wait for hover with vertical check only
-        var verticalCheck = new PositionValidator.AxisCheck { checkX = false, checkZ = false };
-        Vector3 hoverTarget = new Vector3(startPos.x, _drone.HoverHeight, startPos.z);
-        yield return PositionValidator.WaitForStateAndPosition(
-            _drone,
-            DroneController.FlightState.Hover,
-            hoverTarget,
-            verticalCheck
-        );
-        Debug.Log($"[C2] Reached hover position: {_drone.DroneOffset.position}");
-
-        // 4. Wait in hover
-        yield return new WaitForSeconds(config.interStepPause);
-
-        // 5. Get initial random position from NavigationZone
-        Vector3 initialTargetPos = _targetPositioner.GetRandomPositionInZone("NavigationZone");
-        initialTargetPos.y = _drone.transform.position.y; // keep at hover height
-        _targetPositioner.SetActiveTargetPosition(initialTargetPos);
-        Debug.Log($"[C2] Selected initial target position: {initialTargetPos}");
-
-        // 6. Cruise to target and hover
-        yield return StartCoroutine(_drone.HoverAtPosition(initialTargetPos, 3f));
-        Debug.Log($"[C2] Completed hover at initial target position: {_drone.DroneOffset.position}");
-
-        // 7. Signal uncertainty
-        _hmi.SetStatus(DroneHMI.HMIState.Uncertain, true);
-        yield return StartCoroutine(WaitForHMIComplete());
-        Debug.Log("[C2] Uncertainty HMI complete");
-
-        // 8. Wait
-        yield return new WaitForSeconds(config.interStepPause);
-
-        // 9. Show interaction zone and enable point gesture
-        _interactionManager.ShowCue("interaction_zone");
-        _interactionManager.StartInteraction("point");
-        Debug.Log("[C2] Enabled point gesture interaction");
-
-        // 10. Landing attempt loop
-        for (int attempt = 0; attempt < config.landingAttempts; attempt++)
-        {
-            Debug.Log($"[C2] Starting landing attempt {attempt + 1}/{config.landingAttempts}");
-            yield return new WaitForSeconds(config.interStepPause);
-
-            // Wait for user to point to a location
-            bool hasPointed = false;
-            Vector3 pointedPosition = Vector3.zero;
-            _interactionManager.OnInteractionComplete += () => 
-            {
-                hasPointed = true;
-                // Get the pointed position from the interaction handler
-                if (_interactionManager.TryGetPointedPosition(out Vector3 pos))
-                {
-                    pointedPosition = pos;
-                }
-            };
-            yield return new WaitUntil(() => hasPointed);
-            _interactionManager.OnInteractionComplete -= () => hasPointed = true;
-
-            // Set the active target to the pointed position
-            pointedPosition.y = _drone.transform.position.y; // keep at hover height
-            _targetPositioner.SetActiveTargetPosition(pointedPosition);
-            Debug.Log($"[C2] User pointed to position: {pointedPosition}");
-
-            // Show ring cue and spline at pointed position
-            _interactionManager.ShowCue("ring");
-            _splineManager.ShowSpline();
-            Debug.Log("[C2] Showing ring cue and spline at pointed position");
-
-            // Wait for user confirmation of the pointed position
-            bool isConfirmed = false;
-            _interactionManager.OnInteractionComplete += () => isConfirmed = true;
-            yield return new WaitUntil(() => isConfirmed);
-            _interactionManager.OnInteractionComplete -= () => isConfirmed = true;
-
-            if (isConfirmed)
-            {
-                // Play confirmation HMI
-                _hmi.SetStatus(DroneHMI.HMIState.Success, true);
-                yield return StartCoroutine(WaitForHMIComplete());
-                Debug.Log("[C2] Confirmation HMI complete");
-
-                // Extend legs
-                _landingGear.RetractLegs();
-                yield return new WaitForSeconds(config.interStepPause);
-
-                // Cruise to target and hover briefly
-                yield return StartCoroutine(_drone.HoverAtPosition(pointedPosition, 1f));
-                Debug.Log($"[C2] Completed hover at target position: {_drone.DroneOffset.position}");
-
-                // Begin landing
-                float descentHeight = _drone.AbortHeight * 0.8f;
-                Vector3 descentPos = pointedPosition;
-                descentPos.y = descentHeight;
-                _drone.TransitionToLanding(descentPos);
-                yield return PositionValidator.WaitForStateAndPosition(
-                    _drone,
-                    DroneController.FlightState.Descending,
-                    descentPos,
-                    verticalCheck
-                );
-                Debug.Log($"[C2] Completed landing at: {_drone.DroneOffset.position}");
-
-                // Landing successful, break the loop
-                break;
-            }
-            else
-            {
-                // Play decline HMI
-                _hmi.SetStatus(DroneHMI.HMIState.Reject, true);
-                yield return StartCoroutine(WaitForHMIComplete());
-                Debug.Log("[C2] Decline HMI complete");
-
-                // Hide visual cues
-                _interactionManager.HideCue("ring");
-                _splineManager.HideSpline();
-            }
-        }
-
-        // Hide interaction zone at the end
-        _interactionManager.HideCue("interaction_zone");
-
-        // 11. Show completion HMI
-        _hmi.SetStatus(DroneHMI.HMIState.Success, true);
-        yield return StartCoroutine(WaitForHMIComplete());
-        Debug.Log("[C2] Completion HMI complete");
-
-        // 12. Stop rotors
-        _rotors.StopRotors();
-        
-        Debug.Log("[C2] Completed C-2 Scenario");
+        Debug.Log("Completed C-2 Scenario");
     }
     
     #endregion

@@ -93,32 +93,4 @@ public class PositionValidator : MonoBehaviour
     {
         return IsAtPosition(current.position, target.position, check);
     }
-
-    /// <summary>
-    /// Coroutine helper: Wait until the drone is in the given state and at the target position (with axis check)
-    /// </summary>
-    public static IEnumerator WaitForStateAndPosition(DroneController drone, DroneController.FlightState state, Vector3 target, AxisCheck axisCheck)
-    {
-        float startTime = Time.time;
-        float timeout = 10f; // 10 seconds timeout
-        bool reachedTarget = false;
-
-        while (!reachedTarget && (Time.time - startTime) < timeout)
-        {
-            reachedTarget = drone.CurrentState == state && IsAtPosition(drone.DroneOffset, target, axisCheck);
-            if (!reachedTarget)
-            {
-                yield return new WaitForSeconds(0.1f); // Check every 100ms
-            }
-        }
-
-        if (!reachedTarget)
-        {
-            Debug.LogWarning($"[PositionValidator] Timeout waiting for drone to reach state={state} and position={target}");
-        }
-        else
-        {
-            Debug.Log($"[PositionValidator] Successfully reached state={state} and position={target}");
-        }
-    }
 } 

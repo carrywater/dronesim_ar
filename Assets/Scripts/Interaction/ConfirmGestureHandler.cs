@@ -15,14 +15,14 @@ namespace Interaction
 
         private DistanceHandGrabInteractable _interactable;
         private bool _isEnabled;
-
+    
         private void Start()
-        {
+    {
             _interactable = GetComponent<DistanceHandGrabInteractable>();
             if (_interactable != null)
-            {
+        {
                 _interactable.WhenPointerEventRaised += OnPointerEvent;
-            }
+        }
         }
 
         public void EnableInteraction()
@@ -45,13 +45,13 @@ namespace Interaction
 
             // Check for select (grab/pinch) event
             if (evt.Type == PointerEventType.Select)
-            {
-                OnTargetPlaced?.Invoke();
-            }
-        }
-
-        private void OnDestroy()
         {
+                OnTargetPlaced?.Invoke();
+        }
+    }
+    
+        private void OnDestroy()
+    {
             if (_interactable != null)
             {
                 _interactable.WhenPointerEventRaised -= OnPointerEvent;

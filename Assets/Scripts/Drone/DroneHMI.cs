@@ -64,14 +64,13 @@ public class DroneHMI : MonoBehaviour
         // Trigger LED animation state
         if (_ledAnimator != null)
         {
+            // Only reset the triggers we know exist
             _ledAnimator.ResetTrigger("Idle");
             _ledAnimator.ResetTrigger("Uncertain");
             _ledAnimator.ResetTrigger("PromptConfirm");
             _ledAnimator.ResetTrigger("PromptGuide");
             _ledAnimator.ResetTrigger("Landing");
             _ledAnimator.ResetTrigger("Abort");
-            _ledAnimator.ResetTrigger("Success");
-            _ledAnimator.ResetTrigger("Reject");
 
             string trigger = null;
             AudioClip clip = null;

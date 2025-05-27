@@ -45,7 +45,7 @@ namespace Visualization
                 Debug.LogError("SplineManager: No active target set in TargetPositioner!");
                 return;
             }
-
+            
             if (_splineVisualizer != null)
             {
                 _splineVisualizer.gameObject.SetActive(true); // Force active
@@ -67,7 +67,7 @@ namespace Visualization
         {
             if (_splineVisualizer != null)
                 _splineVisualizer.SetVisible(false);
-            StopSplineUpdate();
+                StopSplineUpdate();
         }
 
         private void StartSplineUpdate(Transform target)
@@ -99,7 +99,7 @@ namespace Visualization
                     Vector3 targetPos = target.position;
                     Debug.Log($"[SplineManager] UpdateSplineRoutine: dronePos={dronePos}, targetPos={targetPos}");
                     // Only update if positions changed significantly
-                    if ((dronePos - lastDronePos).sqrMagnitude > 0.0001f ||
+                    if ((dronePos - lastDronePos).sqrMagnitude > 0.0001f || 
                         (targetPos - lastTargetPos).sqrMagnitude > 0.0001f)
                     {
                         Debug.Log("[SplineManager] Updating spline");
