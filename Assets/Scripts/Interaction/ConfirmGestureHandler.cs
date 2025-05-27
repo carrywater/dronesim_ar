@@ -1,8 +1,7 @@
 using UnityEngine;
 using System;
-using Oculus.Interaction.HandGrab;
-using Oculus.Interaction;
 using Interaction;
+using Oculus.Interaction;
 
 namespace Interaction
 {
@@ -11,50 +10,49 @@ namespace Interaction
     /// </summary>
     public class ConfirmGestureHandler : MonoBehaviour
     {
-        public event Action OnTargetPlaced;
+        public event Action OnThumbsUp;
+        public event Action OnThumbsDown;
 
-        private DistanceHandGrabInteractable _interactable;
-        private bool _isEnabled;
-    
-        private void Start()
-    {
-            _interactable = GetComponent<DistanceHandGrabInteractable>();
-            if (_interactable != null)
-        {
-                _interactable.WhenPointerEventRaised += OnPointerEvent;
-        }
-        }
+        // Add references to the four SelectorUnityEventWrappers
+        public SelectorUnityEventWrapper thumbsUpLeft;
+        public SelectorUnityEventWrapper thumbsUpRight;
+        public SelectorUnityEventWrapper thumbsDownLeft;
+        public SelectorUnityEventWrapper thumbsDownRight;
 
-        public void EnableInteraction()
-        {
-            _isEnabled = true;
-            if (_interactable != null)
-                _interactable.enabled = true;
-        }
+        private bool _isActive;
 
-        public void DisableInteraction()
+        private void Awake()
         {
-            _isEnabled = false;
-            if (_interactable != null)
-                _interactable.enabled = false;
+            if (thumbsUpLeft != null)
+                thumbsUpLeft.WhenSelected.AddListener(() => OnGestureDetected(true));
+            if (thumbsUpRight != null)
+                thumbsUpRight.WhenSelected.AddListener(() => OnGestureDetected(true));
+            if (thumbsDownLeft != null)
+                thumbsDownLeft.WhenSelected.AddListener(() => OnGestureDetected(false));
+            if (thumbsDownRight != null)
+                thumbsDownRight.WhenSelected.AddListener(() => OnGestureDetected(false));
         }
 
-        private void OnPointerEvent(PointerEvent evt)
+        public void SetActive(bool active)
         {
-            if (!_isEnabled) return;
-
-            // Check for select (grab/pinch) event
-            if (evt.Type == PointerEventType.Select)
-        {
-                OnTargetPlaced?.Invoke();
+            _isActive = active;
         }
-    }
-    
-        private void OnDestroy()
-    {
-            if (_interactable != null)
+
+        // This would be called by your gesture recognition system
+        public void OnGestureDetected(bool isThumbsUp)
+        {
+            Debug.Log($"[ConfirmGestureHandler] OnGestureDetected called with isThumbsUp={isThumbsUp}, _isActive={_isActive}");
+            if (!_isActive) return;
+
+            if (isThumbsUp)
             {
-                _interactable.WhenPointerEventRaised -= OnPointerEvent;
+                Debug.Log("[ConfirmGestureHandler] Invoking OnThumbsUp event");
+                OnThumbsUp?.Invoke();
+            }
+            else
+            {
+                Debug.Log("[ConfirmGestureHandler] Invoking OnThumbsDown event");
+                OnThumbsDown?.Invoke();
             }
         }
     }

@@ -1,6 +1,8 @@
 using UnityEngine;
 using System;
 using Interaction;
+using Oculus.Interaction.HandGrab;
+using Oculus.Interaction;
 
 namespace Interaction
 {
@@ -8,26 +10,53 @@ namespace Interaction
     /// Handles point-based gestures like thumbs up/down
     /// </summary>
     public class PointGestureHandler : MonoBehaviour
+      {
+        public event Action OnTargetPlaced;
+
+        private DistanceHandGrabInteractable _interactable;
+        private bool _isEnabled;
+    
+        private void Start()
     {
-        public event Action OnThumbsUp;
-        public event Action OnThumbsDown;
-
-        private bool _isActive;
-
-        public void SetActive(bool active)
+            _interactable = GetComponent<DistanceHandGrabInteractable>();
+            if (_interactable != null)
         {
-            _isActive = active;
+                _interactable.WhenPointerEventRaised += OnPointerEvent;
+        }
         }
 
-        // This would be called by your gesture recognition system
-        public void OnGestureDetected(bool isThumbsUp)
+        public void EnableInteraction()
         {
-            if (!_isActive) return;
+            _isEnabled = true;
+            if (_interactable != null)
+                _interactable.enabled = true;
+        }
 
-            if (isThumbsUp)
-                OnThumbsUp?.Invoke();
-            else
-                OnThumbsDown?.Invoke();
+        public void DisableInteraction()
+        {
+            _isEnabled = false;
+            if (_interactable != null)
+                _interactable.enabled = false;
+        }
+
+        private void OnPointerEvent(PointerEvent evt)
+        {
+            if (!_isEnabled) return;
+
+            // Check for select (grab/pinch) event
+            if (evt.Type == PointerEventType.Select)
+        {
+                OnTargetPlaced?.Invoke();
         }
     }
+    
+        private void OnDestroy()
+    {
+            if (_interactable != null)
+            {
+                _interactable.WhenPointerEventRaised -= OnPointerEvent;
+            }
+        }
+    }
+
 } 

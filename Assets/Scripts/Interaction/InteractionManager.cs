@@ -23,6 +23,7 @@ public class InteractionManager : MonoBehaviour
 
     public bool IsInteractionComplete { get; private set; }
     public event Action OnInteractionComplete;
+    public event Action<bool> OnConfirmInteractionResult; // true = confirm, false = reject
 
     private void Awake()
     {
@@ -79,14 +80,16 @@ public class InteractionManager : MonoBehaviour
         {
             if (handler is PointGestureHandler pointHandler)
             {
-                pointHandler.SetActive(true);
-                pointHandler.OnThumbsUp += CompleteInteraction;
-                pointHandler.OnThumbsDown += CompleteInteraction;
+                pointHandler.EnableInteraction();
+                pointHandler.OnTargetPlaced += CompleteInteraction;
             }
             else if (handler is ConfirmGestureHandler confirmHandler)
             {
-                confirmHandler.OnTargetPlaced += CompleteInteraction;
-                confirmHandler.EnableInteraction();
+                confirmHandler.SetActive(true);
+                confirmHandler.OnThumbsUp -= HandleConfirm;
+                confirmHandler.OnThumbsDown -= HandleReject;
+                confirmHandler.OnThumbsUp += HandleConfirm;
+                confirmHandler.OnThumbsDown += HandleReject;
             }
             // Add more handler types as needed
         }
@@ -102,18 +105,21 @@ public class InteractionManager : MonoBehaviour
         {
             if (handler is PointGestureHandler pointHandler)
             {
-                pointHandler.SetActive(false);
-                pointHandler.OnThumbsUp -= CompleteInteraction;
-                pointHandler.OnThumbsDown -= CompleteInteraction;
+                pointHandler.DisableInteraction();
+                pointHandler.OnTargetPlaced -= CompleteInteraction;
             }
             else if (handler is ConfirmGestureHandler confirmHandler)
             {
-                confirmHandler.OnTargetPlaced -= CompleteInteraction;
-                confirmHandler.DisableInteraction();
+                confirmHandler.SetActive(false);
+                confirmHandler.OnThumbsUp -= HandleConfirm;
+                confirmHandler.OnThumbsDown -= HandleReject;
             }
             // Add more handler types as needed
         }
     }
+
+    private void HandleConfirm() { OnConfirmInteractionResult?.Invoke(true); CompleteInteraction(); }
+    private void HandleReject() { OnConfirmInteractionResult?.Invoke(false); CompleteInteraction(); }
 
     private void CompleteInteraction()
     {

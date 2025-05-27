@@ -80,8 +80,12 @@ public class DroneController : MonoBehaviour
     private Vector3 _currentVelocity = Vector3.zero;
     private bool _isMoving = false;
     private bool _isStopped = false;
+    private bool _isTransitioning = false;
     private float _arrivalThreshold = 0.01f;  // Small tolerance for position comparison
     private float _stoppedThreshold = 0.01f;  // Small tolerance for velocity comparison
+    private float _moveStartTime = 0f;
+    private float _expectedMoveTime = 0f;
+    private bool _moveTakingLong = false;
     private bool _isInitialized = false;
     
     #endregion
@@ -271,7 +275,6 @@ public class DroneController : MonoBehaviour
             Debug.LogWarning($"DroneController: Invalid transition from {_currentState} to Aborting");
             return;
         }
-        // Keep current XZ position, only change Y
         Vector3 currentPos = _droneOffset.localPosition;
         _targetPosition = new Vector3(currentPos.x, _abortHeight, currentPos.z);
         Debug.Log($"[DroneController] TransitionToAbort: _targetPosition={_targetPosition}, currentPos={currentPos}");
@@ -312,7 +315,7 @@ public class DroneController : MonoBehaviour
     /// </summary>
     public bool IsMovementComplete()
     {
-        return !_isMoving && _isStopped;  // Check both flags to ensure true completion
+        return !_isMoving && _isStopped && !_isTransitioning;
     }
     
     /// <summary>
@@ -357,16 +360,16 @@ public class DroneController : MonoBehaviour
             Debug.LogError("DroneController: Cannot transition - not initialized!");
             return false;
         }
-        
-        // Allow transitions while moving for Descending, Aborting, and Hover
-        if (_isMoving && targetState != FlightState.Aborting && 
-            targetState != FlightState.Descending && 
-            targetState != FlightState.Hover)
+
+        // Only allow transitions while moving for emergency states
+        bool canTransitionWhileMoving = targetState == FlightState.Aborting;
+
+        if (_isMoving && !canTransitionWhileMoving)
         {
-            Debug.LogWarning("DroneController: Cannot transition while moving");
+            Debug.LogWarning($"DroneController: Cannot transition to {targetState} while moving");
             return false;
         }
-        
+
         // State-specific validation
         switch (_currentState)
         {
@@ -388,43 +391,39 @@ public class DroneController : MonoBehaviour
                 return targetState == FlightState.LandingAbort || 
                        targetState == FlightState.Idle || 
                        targetState == FlightState.Aborting ||
-                       targetState == FlightState.Hover;  // Allow transition to Hover
+                       targetState == FlightState.Hover;
             case FlightState.LandingAbort:
                 return targetState == FlightState.Hover || 
                        targetState == FlightState.Aborting;
             case FlightState.Aborting:
                 return targetState == FlightState.Despawning;
             case FlightState.Despawning:
-                return false; // No valid transitions from despawning
+                return false;
             default:
                 return false;
         }
     }
     
-    private float _moveStartTime = 0f;
-    private float _expectedMoveTime = 0f;
-    private bool _moveTakingLong = false;
-
     private void StartMovement()
     {
         _isMoving = true;
+        _isStopped = false;
+        _isTransitioning = false;
         float distance = Vector3.Distance(_droneOffset.localPosition, _targetPosition);
         float speed = GetSpeedForState(_currentState);
         float smoothTime = CalculateSmoothTime(distance, speed);
         _moveStartTime = Time.time;
-        _expectedMoveTime = distance / Mathf.Max(speed, 0.01f); // avoid div by zero
+        _expectedMoveTime = distance / Mathf.Max(speed, 0.01f);
         _moveTakingLong = false;
         Debug.Log($"[DroneController] StartMovement: state={_currentState}, from={_droneOffset.localPosition}, to={_targetPosition}, distance={distance}, speed={speed}, smoothTime={smoothTime}, isMoving={_isMoving}");
     }
     
     private void UpdateMovement()
     {
-        // Use a fixed, realistic smoothTime for vertical moves (Hover/Abort), e.g., 0.6s
-        float smoothTime = 0.6f;
-        if (_currentState == FlightState.Cruising)
-            smoothTime = 0.4f; // horizontal moves can be a bit snappier
-        else if (_currentState == FlightState.Descending)
-            smoothTime = 0.8f; // landing is slower
+        // Calculate smooth time based on distance and speed
+        float distance = Vector3.Distance(_droneOffset.localPosition, _targetPosition);
+        float speed = GetSpeedForState(_currentState);
+        float smoothTime = CalculateSmoothTime(distance, speed);
 
         float snapThreshold = 0.07f; // 7cm, realistic for a drone
         float stopVelocity = 0.03f;  // 3cm/s, realistic for a drone
@@ -444,7 +443,7 @@ public class DroneController : MonoBehaviour
                 smoothTime
             );
         }
-        Debug.Log($"[DroneController] UpdateMovement: new _droneOffset.localPosition={_droneOffset.localPosition}");
+        Debug.Log($"[DroneController] UpdateMovement: new _droneOffset.localPosition={_droneOffset.localPosition}, speed={speed}, smoothTime={smoothTime}");
     }
     
     private void CheckMovementCompletion()
@@ -469,22 +468,33 @@ public class DroneController : MonoBehaviour
             {
                 case FlightState.Descending:
                     Debug.Log("[DroneController] Completed descent, transitioning to Hover state");
-                    _currentState = FlightState.Hover;  // Transition to Hover after descent
-                    break;
-                case FlightState.Cruising:
-                    Debug.Log("[DroneController] Completed cruise, transitioning to Cruising state");
-                    _currentState = FlightState.Cruising;
-                    break;
-                case FlightState.Aborting:
-                    Debug.Log("[DroneController] Completed abort, transitioning to Aborting state");
-                    _currentState = FlightState.Aborting;
-                    break;
-                case FlightState.Hover:
-                    Debug.Log("[DroneController] Completed hover, transitioning to Hover state");
+                    _isTransitioning = true;
                     _currentState = FlightState.Hover;
+                    _isTransitioning = false;
+                    OnStateComplete?.Invoke(FlightState.Descending);
                     break;
+
+                case FlightState.Cruising:
+                    Debug.Log("[DroneController] Completed cruise, transitioning to Hover state");
+                    _isTransitioning = true;
+                    _currentState = FlightState.Hover;
+                    _isTransitioning = false;
+                    OnStateComplete?.Invoke(FlightState.Cruising);
+                    break;
+
+                case FlightState.Aborting:
+                    Debug.Log("[DroneController] Completed abort, staying in Aborting state");
+                    OnStateComplete?.Invoke(FlightState.Aborting);
+                    break;
+
+                case FlightState.Hover:
+                    Debug.Log("[DroneController] Completed hover movement");
+                    OnStateComplete?.Invoke(FlightState.Hover);
+                    break;
+
                 default:
                     Debug.Log($"[DroneController] Completed movement in {_currentState} state");
+                    OnStateComplete?.Invoke(_currentState);
                     break;
             }
         }
