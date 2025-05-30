@@ -18,12 +18,17 @@ public class InteractionManager : MonoBehaviour
     [Tooltip("Register all interaction handlers by type (e.g., 'point', 'confirm', etc.)")]
     [SerializeField] private List<MonoBehaviour> _interactionHandlers; // e.g., PointGestureHandler, ConfirmGestureHandler
 
+    [Header("Target Positioner Reference")]
+    [Tooltip("Reference to the TargetPositioner for updating the active target position")]
+    [SerializeField] private TargetPositioner _targetPositioner;
+
     private Dictionary<string, GameObject> _cueDict;
     private Dictionary<string, MonoBehaviour> _handlerDict;
 
     public bool IsInteractionComplete { get; private set; }
     public event Action OnInteractionComplete;
     public event Action<bool> OnConfirmInteractionResult; // true = confirm, false = reject
+    public Vector3 LastPickedPosition { get; private set; }
 
     private void Awake()
     {
@@ -74,14 +79,25 @@ public class InteractionManager : MonoBehaviour
     /// </summary>
     public void StartInteraction(string interactionType)
     {
+        Debug.Log($"[InteractionManager] StartInteraction called for type: {interactionType}");
         IsInteractionComplete = false;
         interactionType = interactionType.ToLower();
         if (_handlerDict.TryGetValue(interactionType, out var handler))
         {
             if (handler is PointGestureHandler pointHandler)
             {
+                Debug.Log("[InteractionManager] Enabling PointGestureHandler");
                 pointHandler.EnableInteraction();
-                pointHandler.OnTargetPlaced += CompleteInteraction;
+                pointHandler.OnTargetPlaced += (pos) =>
+                {
+                    LastPickedPosition = pos;
+                    if (_targetPositioner != null)
+                    {
+                        _targetPositioner.SetActiveTargetPosition(pos);
+                        Debug.Log($"[InteractionManager] Set active target position to {pos}");
+                    }
+                    CompleteInteraction();
+                };
             }
             else if (handler is ConfirmGestureHandler confirmHandler)
             {
@@ -93,6 +109,10 @@ public class InteractionManager : MonoBehaviour
             }
             // Add more handler types as needed
         }
+        else
+        {
+            Debug.LogWarning($"[InteractionManager] No handler found for type: {interactionType}");
+        }
     }
 
     /// <summary>
@@ -100,13 +120,14 @@ public class InteractionManager : MonoBehaviour
     /// </summary>
     public void StopInteraction(string interactionType)
     {
+        Debug.Log($"[InteractionManager] StopInteraction called for type: {interactionType}");
         interactionType = interactionType.ToLower();
         if (_handlerDict.TryGetValue(interactionType, out var handler))
         {
             if (handler is PointGestureHandler pointHandler)
             {
+                Debug.Log("[InteractionManager] Disabling PointGestureHandler");
                 pointHandler.DisableInteraction();
-                pointHandler.OnTargetPlaced -= CompleteInteraction;
             }
             else if (handler is ConfirmGestureHandler confirmHandler)
             {
@@ -116,14 +137,31 @@ public class InteractionManager : MonoBehaviour
             }
             // Add more handler types as needed
         }
+        else
+        {
+            Debug.LogWarning($"[InteractionManager] No handler found for type: {interactionType}");
+        }
     }
 
-    private void HandleConfirm() { OnConfirmInteractionResult?.Invoke(true); CompleteInteraction(); }
-    private void HandleReject() { OnConfirmInteractionResult?.Invoke(false); CompleteInteraction(); }
+    private void HandleConfirm()
+    {
+        Debug.Log("Confirm interaction handled");
+        OnConfirmInteractionResult?.Invoke(true);
+        CompleteInteraction();
+    }
+
+    private void HandleReject()
+    {
+        Debug.Log("Reject interaction handled");
+        OnConfirmInteractionResult?.Invoke(false);
+        CompleteInteraction();
+    }
 
     private void CompleteInteraction()
     {
+        Debug.Log("[InteractionManager] CompleteInteraction called");
         IsInteractionComplete = true;
         OnInteractionComplete?.Invoke();
+        Debug.Log("[InteractionManager] OnInteractionComplete event invoked");
     }
 } 

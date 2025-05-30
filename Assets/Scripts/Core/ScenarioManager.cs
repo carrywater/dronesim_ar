@@ -3,6 +3,8 @@ using System.Collections;
 using TMPro;
 using Utils;
 using Visualization;
+using Interaction;
+using System;
 
 /// <summary>
 /// Orchestrates C-0/C-1/C-2 scenario flows; drives drone, HMI, and AR interfaces
@@ -44,12 +46,13 @@ public class ScenarioManager : MonoBehaviour
     [SerializeField] private DroneLandingGear _landingGear;
     [SerializeField] private SplineManager _splineManager;
     [SerializeField] private DroneHMDTracker _hmdTracker;
+    [SerializeField] private PackageDropper _packageDropper;
     
     [Header("Scenario Configurations")]
     [Tooltip("Config for C0 scenario")]
     [SerializeField] private ScenarioConfig _c0Config = new ScenarioConfig { interStepPause = 0.5f };
     [Tooltip("Config for C1 scenario")]
-    [SerializeField] private C1ScenarioConfig _c1Config = new C1ScenarioConfig { interStepPause = 0.5f, confirmRejectTimeout = 30f };
+    [SerializeField] private C1ScenarioConfig _c1Config = new C1ScenarioConfig { interStepPause = 0.5f, confirmRejectTimeout = 30f, landingAttempts = 3 };
     [Tooltip("Config for C2 scenario")]
     [SerializeField] private ScenarioConfig _c2Config = new ScenarioConfig { interStepPause = 0.5f };
 
@@ -76,7 +79,6 @@ public class ScenarioManager : MonoBehaviour
     private class C1ScenarioConfig : ScenarioConfig
     {
         public float confirmRejectTimeout = 30f;
-        public int maxAttempts = 3;
     }
     
     #endregion
@@ -183,6 +185,51 @@ public class ScenarioManager : MonoBehaviour
         _hmi.SetStatus(DroneHMI.HMIState.Uncertain, true);
         yield return StartCoroutine(WaitForHMIComplete());
         Debug.Log("[C1] Uncertainty HMI complete");
+    }
+
+    // Helper to get the real-world floor anchor Y position (MRUK), or 0 if not found
+    private float GetFloorAnchorY()
+    {
+        var mruk = Meta.XR.MRUtilityKit.MRUK.Instance;
+        if (mruk != null)
+        {
+            var room = mruk.GetCurrentRoom();
+            if (room != null && room.FloorAnchor != null)
+                return room.FloorAnchor.transform.position.y;
+        }
+        Debug.LogWarning("[ScenarioManager] No floor anchor found! Using Y=0.");
+        return 0f;
+    }
+    
+    // Shared scenario start: takeoff, hover, HMD, HMI, landing gear, first approach/uncertainty
+    private IEnumerator SharedScenarioStartAndUncertainty(ScenarioConfig config, Action<Vector3> onTargetSelected)
+    {
+        Vector3 startPos = new Vector3(-3f, 0f, 2f);
+        EnsureDroneAt(startPos, _drone.AbortHeight);
+        Debug.Log($"[C1] Initial position set: root={startPos}, offset Y={_drone.AbortHeight}");
+        yield return new WaitForSeconds(config.interStepPause);
+        _rotors.StartRotors();
+        yield return new WaitForSeconds(config.interStepPause);
+        _drone.TransitionToHover();
+        Debug.Log($"[C1] Transitioning to hover at height={_drone.HoverHeight}");
+        yield return new WaitUntil(() => _drone.IsMovementComplete());
+        Debug.Log($"[C1] Reached hover position: {_drone.DroneOffset.position}");
+        _hmdTracker.EnableTracking(true);
+        Debug.Log("[C1] Started HMD tracking");
+        _hmi.SetStatus(DroneHMI.HMIState.PromptConfirm, true);
+        yield return StartCoroutine(WaitForHMIComplete());
+        Debug.Log("[C1] HMI sequence complete");
+        yield return new WaitForSeconds(config.interStepPause);
+        _landingGear.RetractLegs();
+        yield return new WaitForSeconds(config.interStepPause);
+
+        // First approach and uncertainty
+        Vector3 targetPos = _targetPositioner.GetRandomPositionInZone("NavigationZone");
+        targetPos.y = _drone.transform.position.y;
+        _targetPositioner.SetActiveTargetPosition(targetPos);
+        Debug.Log($"[C1] Selected target position: {targetPos}");
+        yield return StartCoroutine(ApproachAndSignalUncertainty(targetPos, config.interStepPause));
+        onTargetSelected?.Invoke(targetPos);
     }
     
     #endregion
@@ -447,42 +494,17 @@ public class ScenarioManager : MonoBehaviour
     /// <summary>
     /// Run the C1 scenario (medium autonomy with confirmation)
     /// </summary>
-    private IEnumerator RunC1Scenario(ScenarioConfig baseConfig)
+    private IEnumerator RunC1Scenario(ScenarioConfig config)
     {
-        var config = baseConfig as C1ScenarioConfig;
         Debug.Log("[C1] Starting C-1 Scenario (Confirm)");
 
-        // Shared start (same as C0 up to first uncertainty)
-        Vector3 startPos = new Vector3(-3f, 0f, 2f);
-        EnsureDroneAt(startPos, _drone.AbortHeight);
-        Debug.Log($"[C1] Initial position set: root={startPos}, offset Y={_drone.AbortHeight}");
-        yield return new WaitForSeconds(config.interStepPause);
-        _rotors.StartRotors();
-        yield return new WaitForSeconds(config.interStepPause);
-        _drone.TransitionToHover();
-        Debug.Log($"[C1] Transitioning to hover at height={_drone.HoverHeight}");
-        yield return new WaitUntil(() => _drone.IsMovementComplete());
-        Debug.Log($"[C1] Reached hover position: {_drone.DroneOffset.position}");
-        _hmdTracker.EnableTracking(true);
-        Debug.Log("[C1] Started HMD tracking");
-        _hmi.SetStatus(DroneHMI.HMIState.PromptConfirm, true);
-        yield return StartCoroutine(WaitForHMIComplete());
-        Debug.Log("[C1] HMI sequence complete");
-        yield return new WaitForSeconds(config.interStepPause);
-        _landingGear.RetractLegs();
-        yield return new WaitForSeconds(config.interStepPause);
-
-        // First approach and uncertainty
-        Vector3 targetPos = _targetPositioner.GetRandomPositionInZone("NavigationZone");
-        targetPos.y = _drone.transform.position.y;
-        _targetPositioner.SetActiveTargetPosition(targetPos);
-        Debug.Log($"[C1] Selected target position: {targetPos}");
-        yield return StartCoroutine(ApproachAndSignalUncertainty(targetPos, config.interStepPause));
+        Vector3 firstTarget = Vector3.zero;
+        yield return StartCoroutine(SharedScenarioStartAndUncertainty(config, t => firstTarget = t));
 
         // --- C1-specific loop ---
         bool confirmed = false;
         int attempts = 0;
-        while (!confirmed && attempts < config.maxAttempts)
+        while (!confirmed && attempts < config.landingAttempts)
         {
             attempts++;
             // Reset HMI to Idle state at start of each attempt
@@ -490,7 +512,7 @@ public class ScenarioManager : MonoBehaviour
             Debug.Log("[C0] Reset HMI to Idle state");
 
             // Randomize target in InteractionZone (reuse targetPos variable)
-            targetPos = _targetPositioner.GetRandomPositionInZone("NavigationZone");
+            Vector3 targetPos = _targetPositioner.GetRandomPositionInZone("NavigationZone");
             targetPos.y = _drone.transform.position.y;
             _targetPositioner.SetActiveTargetPosition(targetPos);
             Debug.Log($"[C1] Selected target position: {targetPos}");
@@ -516,12 +538,15 @@ public class ScenarioManager : MonoBehaviour
             Debug.Log("[C1] Subscribed to OnConfirmInteractionResult");
 
             float timer = 0f;
-            while (!userResponded && timer < config.confirmRejectTimeout)
+            float timeout = 30f;
+            // Use confirmRejectTimeout if present in config (C1ScenarioConfig), else fallback to 30s
+            if (config is C1ScenarioConfig c1cfg) timeout = c1cfg.confirmRejectTimeout;
+            while (!userResponded && timer < timeout)
             {
                 timer += Time.deltaTime;
                 if (timer % 5f < Time.deltaTime) // Log every 5 seconds
                 {
-                    Debug.Log($"[C1] Waiting for user input... Timer: {timer:F1}s / {config.confirmRejectTimeout}s");
+                    Debug.Log($"[C1] Waiting for user input... Timer: {timer:F1}s / {timeout}s");
                 }
                 yield return null;
             }
@@ -547,17 +572,31 @@ public class ScenarioManager : MonoBehaviour
                 // Set HMI to a suitable state (e.g., Landing or Idle)
                 _hmi.SetStatus(DroneHMI.HMIState.Landing, true);
                 Debug.Log("[C1] User confirmed landing spot. Proceeding to land.");
-                // LANDING LOGIC: Descend to ground and stay there
+                // LANDING LOGIC: Descend to floor anchor Y and stay there
                 Vector3 landingPos = targetPos;
-                landingPos.y = 0f; // Ground level
-                Debug.Log($"[C1] Landing: descending to ground at {landingPos}");
+                landingPos.y = GetFloorAnchorY();
+                Debug.Log($"[C1] Landing: descending to floor anchor at {landingPos}");
                 _drone.TransitionToLanding(landingPos);
                 yield return new WaitUntil(() => _drone.IsMovementComplete());
-                Debug.Log($"[C1] Landed at ground position: {_drone.DroneOffset.position}");
-                // Optionally, set HMI to Idle or Success
-                _hmi.SetStatus(DroneHMI.HMIState.Idle, true);
+                Debug.Log($"[C1] Landed at floor anchor position: {_drone.DroneOffset.position}");
+                // Drop the package after landing
+                if (_packageDropper != null) {
+                    Debug.Log("[C1] Dropping package after landing");
+                    _packageDropper.Drop();
+                }
+                // Play success HMI, then fly off to abort height
+                Debug.Log("[C1] Playing Success HMI after package drop");
+                _hmi.SetStatus(DroneHMI.HMIState.Success, true);
+                yield return StartCoroutine(WaitForHMIComplete());
+                Debug.Log("[C1] Success HMI complete, flying to abort height");
+                _drone.TransitionToAbort();
+                yield return new WaitUntil(() => _drone.IsMovementComplete());
+                Debug.Log("[C1] Reached abort height after delivery");
+                _rotors.StopRotors();
+                Debug.Log("[C1] Completed C-1 Scenario (Success and exit)");
+                yield break;
             }
-            else if (attempts >= config.maxAttempts)
+            else if (attempts >= config.landingAttempts)
             {
                 Debug.Log("[C1] Max attempts reached. Aborting mission like C0.");
                 _hmi.SetStatus(DroneHMI.HMIState.Abort, true);
@@ -591,9 +630,105 @@ public class ScenarioManager : MonoBehaviour
     /// </summary>
     private IEnumerator RunC2Scenario(ScenarioConfig config)
     {
-        Debug.Log("Starting C-2 Scenario (Guidance)");
+        Debug.Log("[C2] Starting C-2 Scenario (Guided Point)");
+
+        Vector3 firstTarget = Vector3.zero;
+        yield return StartCoroutine(SharedScenarioStartAndUncertainty(config, t => firstTarget = t));
+        
+        // --- C2-specific: Wait for user to point and grab ---
+        Debug.Log("[C2] Enabling Interaction Zone for point gesture");
+        _interactionManager.ShowCue("Interaction Zone");
+        Debug.Log("[C2] Waiting for user to point and grab a landing spot");
+        bool userPicked = false;
+        Vector3 pickedPos = Vector3.zero;
+        void OnPicked()
+        {
+            userPicked = true;
+            pickedPos = _interactionManager.LastPickedPosition;
+            Debug.Log($"[C2] User picked position (from InteractionManager): {pickedPos}");
+        }
+        Debug.Log("[C2] Calling StartInteraction for pointgesturehandler");
+        _interactionManager.StartInteraction("pointgesturehandler");
+        _interactionManager.OnInteractionComplete += OnPicked;
+
+        float timer = 0f;
+        float timeout = 30f;
+        if (config is C1ScenarioConfig c1cfg) timeout = c1cfg.confirmRejectTimeout;
+        while (!userPicked && timer < timeout)
+        {
+            timer += Time.deltaTime;
+            if (timer % 5f < Time.deltaTime)
+            {
+                Debug.Log($"[C2] Waiting for user input... Timer: {timer:F1}s / {timeout}s");
+            }
+            yield return null;
+        }
+        _interactionManager.OnInteractionComplete -= OnPicked;
+        _interactionManager.StopInteraction("pointgesturehandler");
+        _interactionManager.HideCue("Interaction Zone");
+        Debug.Log("[C2] Disabled Interaction Zone after point gesture");
+
+        if (!userPicked)
+        {
+            Debug.Log("[C2] Timeout reached. Aborting mission like C0.");
+            _hmi.SetStatus(DroneHMI.HMIState.Abort, true);
+            yield return StartCoroutine(WaitForHMIComplete());
+            Debug.Log("[C2] Abort HMI complete");
+            _drone.TransitionToAbort();
+            yield return new WaitUntil(() => _drone.IsMovementComplete());
+            Debug.Log("[C2] Reached abort height");
+            yield return new WaitForSeconds(2f);
+            _rotors.StopRotors();
+            Debug.Log("[C2] Completed C-2 Scenario (Aborted)");
+            yield break;
+        }
+
+        // Update the active target to the user-picked position
+        _targetPositioner.SetActiveTargetPosition(pickedPos);
+        Debug.Log($"[C2] Set active target position to {pickedPos}");
+
+        // Show cues at the chosen spot
+        _interactionManager.ShowCue("ring");
+        _splineManager.ShowSpline();
+        Debug.Log("[C2] Showing ring cue and spline at user-picked spot");
         yield return new WaitForSeconds(config.interStepPause);
-        Debug.Log("Completed C-2 Scenario");
+
+        // Move drone horizontally to picked XZ (use pickedPos directly)
+        Vector3 cruisePos = new Vector3(pickedPos.x, _drone.DroneOffset.position.y, pickedPos.z);
+        Debug.Log($"[C2] Moving drone to user-picked XZ: {cruisePos}");
+        _drone.TransitionToCruise(cruisePos);
+        yield return new WaitUntil(() => _drone.IsMovementComplete());
+        Debug.Log($"[C2] Reached cruise position: {_drone.DroneOffset.position}");
+
+        // Descend to floor anchor Y (use pickedPos XZ, floor Y)
+        Vector3 landingPos = pickedPos;
+        landingPos.y = GetFloorAnchorY();
+        Debug.Log($"[C2] Descending to floor anchor at {landingPos}");
+        _drone.TransitionToLanding(landingPos);
+        yield return new WaitUntil(() => _drone.IsMovementComplete());
+        Debug.Log($"[C2] Landed at floor anchor position: {_drone.DroneOffset.position}");
+
+        // Hide cues after descent
+        _interactionManager.HideCue("ring");
+        _splineManager.HideSpline();
+        Debug.Log("[C2] Hiding ring cue and spline");
+
+        // Drop the package after landing
+        if (_packageDropper != null) {
+            Debug.Log("[C2] Dropping package after landing");
+            _packageDropper.Drop();
+        }
+        // Play success HMI, then fly off to abort height
+        Debug.Log("[C2] Playing Success HMI after package drop");
+        _hmi.SetStatus(DroneHMI.HMIState.Success, true);
+        yield return StartCoroutine(WaitForHMIComplete());
+        Debug.Log("[C2] Success HMI complete, flying to abort height");
+        _drone.TransitionToAbort();
+        yield return new WaitUntil(() => _drone.IsMovementComplete());
+        Debug.Log("[C2] Reached abort height after delivery");
+        _rotors.StopRotors();
+        Debug.Log("[C2] Completed C-2 Scenario (Success and exit)");
+        yield break;
     }
     
     #endregion
