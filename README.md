@@ -7,6 +7,36 @@ This framework simulates drone behavior for human-drone interaction research wit
 
 ## Architecture
 
+### Core Components
+
+#### Drone Control System
+- **DroneController**: Core flight state machine managing:
+  - States: Idle, Spawning, Hover, Cruising, Descending, LandingAbort, Aborting, Despawning
+  - Movement execution with smooth acceleration/deceleration
+  - Height management (hover, abort, landing)
+  - Event system for state transitions
+- **DroneMovementController**: Handles detailed movement execution
+- **DroneRotorController**: Manages rotor animations and effects
+- **DroneHMI**: Handles LED animations and audio cues for drone status
+- **DroneLandingGear**: Controls landing gear animations and behavior
+- **DroneHMDTracker**: Tracks HMD position for relative positioning
+
+#### Interaction System
+- **InteractionManager**: Central hub for user interactions
+  - Manages gesture recognition
+  - Controls AR UI elements
+  - Handles scenario-specific interactions
+- **PointGestureHandler**: Processes pointing gestures for C-2 guidance
+- **ConfirmGestureHandler**: Handles thumbs up/down gestures for C-1
+- **PlaneReticleDataIcon**: Manages AR reticle visualization
+
+#### Scenario Management
+- **ScenarioManager**: Orchestrates all scenarios
+  - Manages scenario sequencing
+  - Handles transitions between scenarios
+  - Controls drone behavior for each scenario
+- **ScenarioSequencer**: Handles scenario order randomization/counterbalancing
+
 ### Component Hierarchy
 
 ```
@@ -25,95 +55,92 @@ drone4 (prefab)
         └── c2target
 ```
 
-### Component Responsibilities
-
-| Component | Responsibility | Key Features |
-|-----------|---------------|--------------|
-| **DroneController** | Flight state machine & movement | Idle, Hover, CruiseToTarget, Landing, LandAbort, Abort states |
-| **DroneArrivalDetector** | Detects arrival at destinations | Signals when drone has reached cruise target |
-| **DroneHMI** | LED animations and audio cues | Status indicator for drone intentions |
-| **InteractionManager** | Interaction zones and AR UI | Controls UI cues and handles user interactions |
-| **ZoneRandomizer** | Randomizes targets in zones | Multiple zone-target pairs |
-| **ScenarioManager** | Orchestrates all scenarios | Sequentially runs C-0, C-1, C-2 |
-| **PIDController** | Subtle position sway | Creates realistic drone hovering |
-
 ## Setup Instructions
 
-1. **ZoneRandomizer Setup**:
-   - Add to the root `Zone` GameObject
-   - In the inspector, create Zone-Target pairs:
-     - Pair 0: Name: "C1", Zone Transform: InteractionZone, Target: c1target
-     - Pair 1: Name: "C2", Zone Transform: InteractionZone, Target: c2target
-     - Pair 2: Name: "C0", Zone Transform: NavigationZone, Target: c0target
+1. **Scene Setup**:
+   - Create a new scene or use the provided template
+   - Add the drone4 prefab to the scene
+   - Set up the Zone hierarchy with NavigationZone and InteractionZone
+   - Add target objects (c0target, c1target, c2target)
 
-2. **InteractionManager Setup**:
-   - Add to the InteractionZone GameObject
-   - Assign references:
-     - ZoneRandomizer: reference to the ZoneRandomizer above
-     - DroneController: reference to the drone controller
-     - C1CueObject: the c1target/c1CueOffset with thumbs up/down UI
-     - C2CueObject: the c2target guidance UI
-   - Set Zone Indices:
-     - C1 Zone Index: 0
-     - C2 Zone Index: 1
+2. **Drone Configuration**:
+   - Select the drone4 prefab
+   - Configure DroneController parameters:
+     - Movement Settings (hover, cruise, landing, abort speeds)
+     - Height Settings (hover, abort heights)
+     - Movement Smoothing (acceleration/deceleration times)
+   - Set up DroneHMI references for LED and audio cues
+   - Configure DroneRotorController for visual feedback
 
-3. **Connect UI Events**:
-   - On the thumbs up button (in c1CueOffset):
-     - Add OnClick event calling InteractionManager.HandleConfirm with c1target position
-   - On the thumbs down button:
-     - Add OnClick event calling InteractionManager.HandleReject
+3. **Interaction Setup**:
+   - Add InteractionManager to the InteractionZone
+   - Configure gesture handlers:
+     - PointGestureHandler for C-2 guidance
+     - ConfirmGestureHandler for C-1 confirmation
+   - Set up AR UI elements:
+     - Thumbs up/down UI for C-1
+     - Guidance reticle for C-2
 
-4. **ScenarioManager Setup**:
-   - Add to the drone GameObject
-   - Assign references:
-     - Drone: reference to the DroneController
-     - HMI: reference to the DroneHMI
-     - InteractionManager: reference to the InteractionManager
-     - ZoneRandomizer: reference to the ZoneRandomizer
-   - Set Navigation Zone Index: 2
+4. **Scenario Configuration**:
+   - Add ScenarioManager to the drone
+   - Configure scenario parameters:
+     - C-0: Landing attempts, abort conditions
+     - C-1: Confirmation timeout, landing attempts
+     - C-2: Guidance parameters
+   - Set up ScenarioSequencer for experiment design
 
-## Changes to Note
+## Research Setup
 
-The original architecture had separate components for:
-- **ARInterfaceManager**: Handled AR UI elements
-- **InteractionZoneController**: Managed interaction zones and scenarios
+### Experiment Design
+1. **Scenario Order**:
+   - Use ScenarioSequencer to randomize/counterbalance scenario order
+   - Configure inter-scenario pauses
+   - Set up practice trials if needed
 
-These have been combined into a single **InteractionManager** for simplicity:
-- Provides clearer responsibility boundaries
-- Simplifies connections between components
-- Reduces the need for cross-component event handlers
+2. **Data Collection**:
+   - Log drone positions and states
+   - Record user interactions and response times
+   - Track scenario completion times
+   - Monitor abort conditions and reasons
 
-## Workflow
+3. **Metrics**:
+   
+   - Task completion rates
+   - User confidence ratings
 
-1. When the scene starts, ScenarioManager runs the C-0 scenario
-2. After C-0 completes, it transitions to C-1 (confirm landing spot)
-3. When C-1 completes, it transitions to C-2 (guidance)
-4. Each scenario uses the InteractionManager to handle UI and user inputs
+### Extending the Framework
 
-## Scenario Details
+1. **New Scenarios**:
+   - Create a new scenario type in ScenarioManager
+   - Implement scenario-specific behavior
+   - Add corresponding UI elements
+   - Update ScenarioSequencer
 
-### C-0 (High Autonomy/Abort)
-- Drone cruises to random points in NavigationZone
-- Attempts landing, signals uncertainty, aborts
-- After two attempts, performs full mission abort
+2. **New Interactions**:
+   - Create new gesture handlers
+   - Add to InteractionManager
+   - Implement corresponding UI feedback
 
-### C-1 (Confirm)
-- Drone cruises to InteractionZone
-- Landing probe appears at random position
-- User confirms with thumbs up or rejects with thumbs down
-- On rejection, a new random position is selected
-
-### C-2 (Guidance)
-- Drone cruises to InteractionZone
-- Guidance pad appears
-- User provides direct spatial guidance
-- Drone follows guidance until timeout/completion
+3. **Data Analysis**:
+   - Add custom logging
+   - Implement data export
+   - Create analysis tools
 
 ## Development Notes
 
-- The project uses Unity Netcode for GameObjects for networking
-- AR functionality is implemented using Meta SDK or AR Foundation
-- NavMesh is used for drone navigation
-- The project follows a component-based architecture with single-responsibility principle
-- All scripts are documented with XML comments
-- Each component has a clear, focused responsibility
+- Built with Unity 2022.3 LTS
+- Uses Meta XR Interaction SDK for AR functionality
+- drone movement with PID control
+- Follows component-based architecture
+- XML documentation for all public APIs
+
+## Contributing
+
+1. Follow the existing architecture patterns
+2. Add XML documentation for new components
+3. Include debug logging
+4. Update this README for significant changes
+
+## License
+
+[Your License Information Here]
