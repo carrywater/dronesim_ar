@@ -29,6 +29,10 @@ This framework simulates drone behavior for human-drone interaction research wit
 - **PointGestureHandler**: Processes pointing gestures for C-2 guidance
 - **ConfirmGestureHandler**: Handles thumbs up/down gestures for C-1
 - **PlaneReticleDataIcon**: Manages AR reticle visualization
+- **ThumbCueLookAtHMD**: Makes UI elements face the user
+  - Can be attached to any GameObject that needs to face the HMD
+  - Only rotates on Y axis (yaw) to maintain proper orientation
+  - Useful for thumbs up/down cues and other directional UI elements
 
 #### Scenario Management
 - **ScenarioManager**: Orchestrates all scenarios
@@ -120,6 +124,7 @@ drone4 (prefab)
    - Create new gesture handlers
    - Add to InteractionManager
    - Implement corresponding UI feedback
+   - Use ThumbCueLookAtHMD for any UI elements that need to face the user
 
 3. **Data Analysis**:
    - Add custom logging

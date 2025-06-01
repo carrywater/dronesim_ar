@@ -72042,16 +72042,16 @@ MonoBehaviour:
   _packageDropper: {fileID: 7965006280188629096}
   _c0Config:
     interStepPause: 1.5
-    landingAttempts: 2
+    landingAttempts: 3
   _c1Config:
     interStepPause: 1
     landingAttempts: 2
     confirmRejectTimeout: 30
   _c2Config:
     interStepPause: 1
-    landingAttempts: 2
+    landingAttempts: 3
   _droneStartX: -3
-  _droneStartZ: 2
+  _droneStartZ: 3
   _droneOffsetYMode: 0
 --- !u!114 &2743093437916916947 stripped
 MonoBehaviour:
