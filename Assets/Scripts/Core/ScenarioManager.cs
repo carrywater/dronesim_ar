@@ -638,6 +638,9 @@ public class ScenarioManager : MonoBehaviour
         // --- C2-specific: Wait for user to point and grab ---
         Debug.Log("[C2] Enabling Interaction Zone for point gesture");
         _interactionManager.ShowCue("Interaction Zone");
+        _interactionManager.ShowCue("QuestionMark");
+        _interactionManager.ShowCue("Index");
+        _interactionManager.ShowCue("Capsule");
         Debug.Log("[C2] Waiting for user to point and grab a landing spot");
         bool userPicked = false;
         Vector3 pickedPos = Vector3.zero;
@@ -666,6 +669,9 @@ public class ScenarioManager : MonoBehaviour
         _interactionManager.OnInteractionComplete -= OnPicked;
         _interactionManager.StopInteraction("pointgesturehandler");
         _interactionManager.HideCue("Interaction Zone");
+        _interactionManager.HideCue("QuestionMark");
+        _interactionManager.HideCue("Index");
+        _interactionManager.HideCue("Capsule");
         Debug.Log("[C2] Disabled Interaction Zone after point gesture");
 
         if (!userPicked)

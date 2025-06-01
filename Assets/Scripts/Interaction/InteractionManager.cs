@@ -52,8 +52,16 @@ public class InteractionManager : MonoBehaviour
     /// </summary>
     public void ShowCue(string cueName)
     {
+        Debug.Log($"[InteractionManager] ShowCue called for: {cueName}");
         if (_cueDict.TryGetValue(cueName, out var cue))
+        {
             cue.SetActive(true);
+            Debug.Log($"[InteractionManager] {cueName} set active: {cue.activeSelf}");
+        }
+        else
+        {
+            Debug.LogWarning($"[InteractionManager] Cue not found: {cueName}");
+        }
     }
 
     /// <summary>
@@ -96,7 +104,6 @@ public class InteractionManager : MonoBehaviour
                         _targetPositioner.SetActiveTargetPosition(pos);
                         Debug.Log($"[InteractionManager] Set active target position to {pos}");
                     }
-                    CompleteInteraction();
                 };
             }
             else if (handler is ConfirmGestureHandler confirmHandler)
