@@ -104,6 +104,7 @@ public class InteractionManager : MonoBehaviour
                         _targetPositioner.SetActiveTargetPosition(pos);
                         Debug.Log($"[InteractionManager] Set active target position to {pos}");
                     }
+                    CompleteInteraction();
                 };
             }
             else if (handler is ConfirmGestureHandler confirmHandler)

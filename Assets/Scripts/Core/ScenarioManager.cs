@@ -204,7 +204,7 @@ public class ScenarioManager : MonoBehaviour
     // Shared scenario start: takeoff, hover, HMD, HMI, landing gear, first approach/uncertainty
     private IEnumerator SharedScenarioStartAndUncertainty(ScenarioConfig config, Action<Vector3> onTargetSelected)
     {
-        Vector3 startPos = new Vector3(-3f, 0f, 2f);
+        Vector3 startPos = new Vector3(_droneStartX, 0f, _droneStartZ);
         EnsureDroneAt(startPos, _drone.AbortHeight);
         Debug.Log($"[C1] Initial position set: root={startPos}, offset Y={_drone.AbortHeight}");
         yield return new WaitForSeconds(config.interStepPause);
@@ -375,7 +375,7 @@ public class ScenarioManager : MonoBehaviour
         Debug.Log("[C0] Starting C-0 Scenario (Abort)");
 
         // 1. Start at abort height
-        Vector3 startPos = new Vector3(-3f, 0f, 2f);
+        Vector3 startPos = new Vector3(_droneStartX, 0f, _droneStartZ);
         EnsureDroneAt(startPos, _drone.AbortHeight);
         Debug.Log($"[C0] Initial position set: root={startPos}, offset Y={_drone.AbortHeight}");
 
@@ -424,9 +424,9 @@ public class ScenarioManager : MonoBehaviour
             Debug.Log($"[C0] Selected target position: {targetPos}");
 
             // Show ring cue and spline before descent
-            Debug.Log("[C0] Showing ring cue and spline");
-            _interactionManager.ShowCue("ring");
-            _splineManager.ShowSpline();
+           // Debug.Log("[C0] Showing ring cue and spline");
+          //  _interactionManager.ShowCue("ring");
+          //  _splineManager.ShowSpline();
             yield return new WaitForSeconds(config.interStepPause);
 
             // Move horizontally to target (XZ only)
@@ -444,10 +444,10 @@ public class ScenarioManager : MonoBehaviour
             yield return new WaitUntil(() => _drone.IsMovementComplete());
             Debug.Log($"[C0] Reached descent position: {_drone.DroneOffset.position}");
 
-            // Hide ring cue and spline after descent
-            Debug.Log("[C0] Hiding ring cue and spline");
-            _interactionManager.HideCue("ring");
-            _splineManager.HideSpline();
+       //     // Hide ring cue and spline after descent
+        //    Debug.Log("[C0] Hiding ring cue and spline");
+         //   _interactionManager.HideCue("ring");
+//_splineManager.HideSpline();
 
             // Signal uncertainty
             Debug.Log("[C0] Setting HMI to Uncertain");
@@ -574,7 +574,7 @@ public class ScenarioManager : MonoBehaviour
                 Debug.Log("[C1] User confirmed landing spot. Proceeding to land.");
                 // LANDING LOGIC: Descend to floor anchor Y and stay there
                 Vector3 landingPos = targetPos;
-                landingPos.y = GetFloorAnchorY();
+                landingPos.y = GetFloorAnchorY() + 0.2f;
                 Debug.Log($"[C1] Landing: descending to floor anchor at {landingPos}");
                 _drone.TransitionToLanding(landingPos);
                 yield return new WaitUntil(() => _drone.IsMovementComplete());
@@ -708,7 +708,7 @@ public class ScenarioManager : MonoBehaviour
 
         // Descend to floor anchor Y (use pickedPos XZ, floor Y)
         Vector3 landingPos = pickedPos;
-        landingPos.y = GetFloorAnchorY();
+        landingPos.y = GetFloorAnchorY() + 0.2f;
         Debug.Log($"[C2] Descending to floor anchor at {landingPos}");
         _drone.TransitionToLanding(landingPos);
         yield return new WaitUntil(() => _drone.IsMovementComplete());
