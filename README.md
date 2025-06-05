@@ -11,11 +11,11 @@ This framework simulates drone behavior for human-drone interaction research wit
 
 #### Drone Control System
 - **DroneController**: Core flight state machine managing:
-  - States: Idle, Spawning, Hover, Cruising, Descending, LandingAbort, Aborting, Despawning
+  - States: Idle, Hover, Cruising, Descending, LandingAbort, Aborting, 
   - Movement execution with smooth acceleration/deceleration
   - Height management (hover, abort, landing)
   - Event system for state transitions
-- **DroneMovementController**: Handles detailed movement execution
+- **DronePIDController**: Handles detailed movement execution
 - **DroneRotorController**: Manages rotor animations and effects
 - **DroneHMI**: Handles LED animations and audio cues for drone status
 - **DroneLandingGear**: Controls landing gear animations and behavior
